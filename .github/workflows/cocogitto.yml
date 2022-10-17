@@ -1,0 +1,26 @@
+name: cocogitto
+
+on:
+  push:
+jobs:
+  cocogitto:
+    name: cocogitto
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      # Check commit messages
+      - name: "Conventional commit check"
+        uses: cocogitto/cocogitto-action@v3
+        with:
+          check: true
+          check-latest-tag-only: true
+
+concurrency:
+  # Support push/pr as event types with different behaviors each:
+  # 1. push: queue up builds
+  # 2. pr: only allow one run per PR
+  group: ${{ github.workflow }}-${{ github.event.type }}${{ github.event.pull_request.number }}
+  # If there is already a workflow running for the same pull request, cancel it
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}

@@ -1,0 +1,20 @@
+[package]
+name = "cerberus"
+version = "0.1.0"
+edition = "2021"
+authors = [
+    "Harry Bairstow <harry@walletconnect.com>",
+    "Derek Rein <derek@walletconnect.com>",
+    "Ivan Reshetnikov <ivan@walletconnect.com>"
+]
+
+license = "Apache-2.0"
+
+[dependencies]
+# Serialization
+serde = { version = "1", features = ["derive", "rc"] }
+
+## Misc
+thiserror = "1.0"
+async-trait = "0.1"
+reqwest = { version = "0.11", features = ["json"] }
