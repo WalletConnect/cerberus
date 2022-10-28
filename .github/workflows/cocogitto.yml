@@ -2,6 +2,7 @@ name: cocogitto
 
 on:
   push:
+
 jobs:
   cocogitto:
     name: cocogitto
