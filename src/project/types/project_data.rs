@@ -1,8 +1,10 @@
-use serde::{Deserialize, Serialize};
-
-use crate::project::error::AccessError;
-use crate::project::Origin;
-use crate::registry::ProjectKey;
+use {
+    crate::{
+        project::{error::AccessError, Origin},
+        registry::ProjectKey,
+    },
+    serde::{Deserialize, Serialize},
+};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -27,14 +29,10 @@ impl ProjectData {
         }
 
         // Make sure the key is `is_valid`.
-        if None
-            == self
-                .keys
-                .iter()
-                .position(|key| key.value == id && key.is_valid)
-        {
-            return Err(AccessError::KeyInvalid);
-        }
+        self.keys
+            .iter()
+            .position(|key| key.value == id && key.is_valid)
+            .ok_or(AccessError::KeyInvalid)?;
 
         // Allow all origins if the list is empty.
         if self.allowed_origins.is_empty() {

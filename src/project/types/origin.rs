@@ -1,9 +1,9 @@
-use std::{fmt::Display, iter::zip, str::FromStr};
-
-use thiserror::Error as ThisError;
-
-use once_cell::sync::Lazy;
-use regex::Regex;
+use {
+    once_cell::sync::Lazy,
+    regex::Regex,
+    std::{fmt::Display, iter::zip, str::FromStr},
+    thiserror::Error as ThisError,
+};
 
 /// Simplified URL parser regex. Extracts only the scheme (optional), hostname
 /// and port (optional).

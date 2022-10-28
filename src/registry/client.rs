@@ -1,17 +1,19 @@
-use std::fmt::Debug;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-
-use async_trait::async_trait;
-use common::metrics;
-use common::storage::KeyValueStorage;
-use reqwest::header::{self, HeaderValue};
-
-use crate::project::ProjectData;
-use crate::registry::cache;
-use crate::registry::cache::CachedProject;
-use crate::registry::error::RegistryError;
-use crate::registry::metrics::ProjectDataMetrics;
+#[cfg(feature = "cache")]
+use {
+    crate::registry::cache,
+    crate::registry::cache::CachedProject,
+    common::storage::KeyValueStorage,
+    std::sync::Arc,
+    std::time::Duration,
+};
+#[cfg(feature = "metrics")]
+use {crate::registry::metrics::ProjectDataMetrics, common::metrics, std::time::Instant};
+use {
+    crate::{project::ProjectData, registry::error::RegistryError},
+    async_trait::async_trait,
+    reqwest::header::{self, HeaderValue},
+    std::fmt::Debug,
+};
 
 const INVALID_TOKEN_ERROR: &str = "invalid auth token";
 
@@ -31,7 +33,10 @@ pub struct RegistryHttpClient {
     base_url: String,
     http_client: reqwest::Client,
 
+    #[cfg(feature = "cache")]
     cache: Option<cache::ProjectStorage>,
+
+    #[cfg(feature = "metrics")]
     metrics: Option<ProjectDataMetrics>,
 }
 
@@ -53,11 +58,14 @@ impl RegistryHttpClient {
         Ok(Self {
             base_url: base_url.into(),
             http_client,
+            #[cfg(feature = "cache")]
             cache: None,
+            #[cfg(feature = "metrics")]
             metrics: None,
         })
     }
 
+    #[cfg(feature = "cache")]
     pub fn cached(
         mut self,
         cache: Arc<dyn KeyValueStorage<CachedProject>>,
@@ -66,15 +74,18 @@ impl RegistryHttpClient {
         self.cache = Some(cache::ProjectStorage {
             cache,
             cache_ttl,
+            #[cfg(feature = "metrics")]
             metrics: self.metrics.clone(),
         });
 
         self
     }
 
+    #[cfg(feature = "metrics")]
     pub fn with_metrics(mut self, metrics: &metrics::AppMetrics) -> Self {
         self.metrics = Some(ProjectDataMetrics::new(metrics));
 
+        #[cfg(feature = "cache")]
         if let Some(cache) = &mut self.cache {
             let mut cache = cache.clone();
             self.cache = Some(cache.with_metrics(metrics).to_owned());
@@ -87,11 +98,14 @@ impl RegistryHttpClient {
 #[async_trait]
 impl RegistryClient for RegistryHttpClient {
     async fn project_data(&self, id: &str) -> RegistryResult<Option<ProjectData>> {
+        #[cfg(feature = "cache")]
         if let Some(cache) = &self.cache {
+            #[cfg(feature = "metrics")]
             let time = Instant::now();
 
-            let data = cache.fetch(id).await;
+            let data = cache.fetch(id).await?;
 
+            #[cfg(feature = "metrics")]
             if let Some(metrics) = self.metrics.as_ref() {
                 metrics.cache_time(time.elapsed())
             }
@@ -105,6 +119,7 @@ impl RegistryClient for RegistryHttpClient {
             }
         }
 
+        #[cfg(feature = "metrics")]
         let time = Instant::now();
 
         let resp = self
@@ -115,10 +130,12 @@ impl RegistryClient for RegistryHttpClient {
 
         let data = parse_http_response(resp).await;
 
+        #[cfg(feature = "metrics")]
         if let Some(metrics) = self.metrics.as_ref() {
             metrics.registry_time(time.elapsed());
         }
 
+        #[cfg(feature = "cache")]
         if let Some(cache) = &self.cache {
             // Cache all responses that we get, even errors.
             let cache_data = match &data {
@@ -133,6 +150,7 @@ impl RegistryClient for RegistryHttpClient {
             let _ = cache.set(id, cache_data);
         }
 
+        #[allow(clippy::let_and_return)]
         data
     }
 }

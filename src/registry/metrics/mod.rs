@@ -1,11 +1,8 @@
-use std::time::Duration;
+use {common::metrics::AppMetrics, opentelemetry::metrics::ValueRecorder, std::time::Duration};
+#[cfg(feature = "cache")]
+use {opentelemetry::metrics::Counter, opentelemetry::KeyValue};
 
-use common::metrics::AppMetrics;
-use opentelemetry::{
-    metrics::{Counter, ValueRecorder},
-    KeyValue,
-};
-
+#[cfg(feature = "cache")]
 use crate::registry::cache::CachedProject;
 
 const METRIC_NAMESPACE: &str = "project_data";
@@ -20,6 +17,7 @@ pub enum ResponseSource {
     Registry,
 }
 
+#[cfg(feature = "cache")]
 fn source_tag(source: ResponseSource) -> KeyValue {
     let value = match source {
         ResponseSource::Cache => "cache",
@@ -29,6 +27,7 @@ fn source_tag(source: ResponseSource) -> KeyValue {
     KeyValue::new("source", value)
 }
 
+#[cfg(feature = "cache")]
 fn response_tag(resp: &CachedProject) -> KeyValue {
     let value = match resp {
         CachedProject::Found(_) => "ok",
@@ -41,14 +40,17 @@ fn response_tag(resp: &CachedProject) -> KeyValue {
 
 #[derive(Clone, Debug)]
 pub struct ProjectDataMetrics {
+    #[cfg(feature = "cache")]
     requests_total: Counter<u64>,
     registry_api_time: ValueRecorder<f64>,
     local_cache_time: ValueRecorder<f64>,
+    #[cfg(feature = "cache")]
     total_time: ValueRecorder<f64>,
 }
 
 impl ProjectDataMetrics {
     pub fn new(app_metrics: &AppMetrics) -> Self {
+        #[cfg(feature = "cache")]
         let requests_total = app_metrics
             .meter()
             .u64_counter(create_counter_name("requests_total"))
@@ -67,6 +69,7 @@ impl ProjectDataMetrics {
             .with_description("Average latency of the local cache fetching")
             .init();
 
+        #[cfg(feature = "cache")]
         let total_time = app_metrics
             .meter()
             .f64_value_recorder(create_counter_name("total_time"))
@@ -74,9 +77,11 @@ impl ProjectDataMetrics {
             .init();
 
         Self {
+            #[cfg(feature = "cache")]
             requests_total,
             registry_api_time,
             local_cache_time,
+            #[cfg(feature = "cache")]
             total_time,
         }
     }
@@ -89,6 +94,7 @@ impl ProjectDataMetrics {
         self.registry_api_time.record(duration_ms(time), &[]);
     }
 
+    #[cfg(feature = "cache")]
     pub fn request(&self, time: Duration, source: ResponseSource, resp: &CachedProject) {
         self.requests_total
             .add(1, &[source_tag(source), response_tag(resp)]);

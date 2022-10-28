@@ -29,87 +29,89 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  AWS_REGION: "eu-central-1"
+  RUST_BACKTRACE: full
 
 jobs:
-  tasks:
-    name: "${{ matrix.cargo.name }}"
-    runs-on: "ubuntu-latest"
+  clippy:
+    name: "Clippy (features=${{ matrix.features }})"
     strategy:
-      fail-fast: false
       matrix:
-        cargo:
-          - name: "Clippy"
-            cmd: clippy
-            args: --all-features --tests -- -D warnings
-            rust: stable
-          - name: "Formatting"
-            cmd: fmt
-            args: -- --check
-            rust: nightly
-          - name: "Unit Tests"
-            cmd: test
-            args: --all-features
-            rust: stable
-        include:
-          - os: ubuntu-latest
-            sccache-path: /home/runner/.cache/sccache
-    env:
-      RUST_BACKTRACE: full
-      RUSTC_WRAPPER: sccache
+        features: ["default", "full", "cache", "metrics"]
+    runs-on: ubuntu-latest
+
     steps:
       - name: "Git checkout"
-      - uses: actions/checkout@v3
+        uses: actions/checkout@v3
 
-      # Install sccache
-      - name: "Install sccache"
-        if: matrix.os == 'ubuntu-latest'
-        env:
-          SCCACHE_URL: https://github.com/mozilla/sccache/releases/download
-          SCCACHE_VERSION: v0.2.15
-        run: |
-          SCCACHE_FILE=sccache-$SCCACHE_VERSION-x86_64-unknown-linux-musl
-          curl -sSL "$SCCACHE_URL/$SCCACHE_VERSION/$SCCACHE_FILE.tar.gz" | tar xz
-          install -vDm 755 "$SCCACHE_FILE/sccache" "$HOME/.local/bin/sccache"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      # Install Rust toolchain
-      - name: "Install Rust ${{ matrix.cargo.rust }}"
+      - name: "Install Rust (stable/minimal)"
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: ${{ matrix.cargo.rust }}
+          toolchain: stable
           profile: minimal
           override: true
 
-      # Rebuild cache
-      - name: Cache cargo registry
+      - name: "Cache cargo registry"
         uses: Swatinem/rust-cache@v2
-        with: ${{ matrix.cargo.cache }}
         continue-on-error: false
 
-      - name: Cache sccache
-        uses: actions/cache@v3
-        continue-on-error: false
-        with:
-          path: ${{ matrix.sccache-path }}
-          key: ${{ runner.os }}-sccache-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-sccache-
-
-      # Run job
-      - name: "Start sccache server"
-        run: |
-          sccache --stop-server || true
-          sccache --start-server
-
-      - name: "Task ${{ matrix.cargo.name }}"
+      - name: "Clippy"
         uses: actions-rs/cargo@v1
         with:
-          command: ${{ matrix.cargo.cmd }}
-          args: ${{ matrix.cargo.args }}
+          command: clippy
+          args: --features ${{ matrix.features }} --tests -- -D warnings
 
-      - name: "Print sccache stats"
-        run: sccache --show-stats
+  check-formatting:
+    name: "Check Formatting"
+    runs-on: ubuntu-latest
 
-      - name: "Stop sccache server"
-        run: sccache --stop-server || true
+    steps:
+      - name: "Git checkout"
+        uses: actions/checkout@v3
+
+      - name: "Install Rust (nightly/default)"
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
+          profile: default
+          override: true
+
+      - name: "Cache cargo registry"
+        uses: Swatinem/rust-cache@v2
+        continue-on-error: false
+
+      - name: "Check Formatting "
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: -- --check
+
+  test:
+    name: "Unit Tests (features=${{ matrix.features }})"
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        features: ["default", "full", "cache", "metrics"]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: "Git checkout"
+        uses: actions/checkout@v3
+
+      - name: "Install Rust (stable/minimal)"
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: "Cache cargo registry"
+        uses: Swatinem/rust-cache@v2
+        with:
+          sharedKey: "tests"
+        continue-on-error: false
+
+      - name: "Unit Tests"
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --features ${{ matrix.features }}

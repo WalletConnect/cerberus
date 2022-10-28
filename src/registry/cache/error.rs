@@ -1,8 +1,9 @@
-use common::storage::error::StorageError;
-use serde::{Deserialize, Serialize};
-use thiserror::Error as ThisError;
-
-use crate::registry::RegistryError;
+use {
+    crate::registry::RegistryError,
+    common::storage::error::StorageError,
+    serde::{Deserialize, Serialize},
+    thiserror::Error as ThisError,
+};
 
 #[derive(Debug, ThisError)]
 pub enum ProjectError {

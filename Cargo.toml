@@ -14,13 +14,13 @@ license = "Apache-2.0"
 [dependencies]
 # Async runtime
 async-trait = "0.1"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt"], optional = true }
 
 # Serialization
 serde = { version = "1", features = ["derive", "rc"] }
 
 # Metrics
-opentelemetry = { version = "0.17", features = ["trace", "metrics", "rt-tokio"] }
+opentelemetry = { version = "0.17", features = ["metrics"], optional = true }
 
 ## Misc
 once_cell = "1.15"
@@ -28,4 +28,15 @@ regex = "1.6"
 reqwest = { version = "0.11", features = ["json"] }
 thiserror = "1.0"
 
-common = { git = "https://github.com/WalletConnect/rs-common.git", tag = "v0.1.0" }
+common = { git = "https://github.com/WalletConnect/rs-common.git", tag = "v0.1.1", optional = true }
+
+[features]
+default = []
+
+full = [
+    "cache",
+    "metrics",
+]
+
+cache = ["tokio", "common"]
+metrics = ["opentelemetry", "common"]
