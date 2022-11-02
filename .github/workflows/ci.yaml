@@ -7,7 +7,7 @@ on:
 
   pull_request:
     paths-ignore:
-      - '.github/**'
+#      - '.github/**'
       - 'docs/**'
       - 'README.md'
 
@@ -32,86 +32,44 @@ env:
   RUST_BACKTRACE: full
 
 jobs:
-  clippy:
-    name: "Clippy (features=${{ matrix.features }})"
+  checks:
+    name: "Checks"
     strategy:
+      fail-fast: false
       matrix:
-        features: ["default", "full", "cache", "metrics"]
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: "Git checkout"
-        uses: actions/checkout@v3
-
-      - name: "Install Rust (stable/minimal)"
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
-          override: true
-
-      - name: "Cache cargo registry"
-        uses: Swatinem/rust-cache@v2
-        continue-on-error: false
-
-      - name: "Clippy"
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --features ${{ matrix.features }} --tests -- -D warnings
-
-  check-formatting:
-    name: "Check Formatting"
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: "Git checkout"
-        uses: actions/checkout@v3
-
-      - name: "Install Rust (nightly/default)"
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          profile: default
-          override: true
-
-      - name: "Cache cargo registry"
-        uses: Swatinem/rust-cache@v2
-        continue-on-error: false
-
-      - name: "Check Formatting "
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: -- --check
-
-  test:
-    name: "Unit Tests (features=${{ matrix.features }})"
-    strategy:
-      matrix:
+        cargo:
+          - name: "Clippy"
+            cmd: clippy
+            args: --all-features --tests -- -D warnings
+          - name: "Check Formatting"
+            cmd: fmt
+            args: -- --check
+            toolchain: nightly
+            profile: default
+          - name: "Unit Tests"
+            cmd: test
+            args: --all-features
         os: [ubuntu-latest]
-        features: ["default", "full", "cache", "metrics"]
+
     runs-on: ${{ matrix.os }}
 
     steps:
       - name: "Git checkout"
         uses: actions/checkout@v3
 
-      - name: "Install Rust (stable/minimal)"
+      - name: "Install Rust (${{ matrix.cargo.toolchain }}/${{ matrix.cargo.profile }})"
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
-          profile: minimal
+          toolchain: ${{ matrix.cargo.toolchain || 'stable' }}
+          profile: ${{ matrix.cargo.profile || 'minimal' }}
           override: true
 
       - name: "Cache cargo registry"
         uses: Swatinem/rust-cache@v2
-        with:
-          sharedKey: "tests"
         continue-on-error: false
 
-      - name: "Unit Tests"
+      - name: "Cargo ${{ matrix.cargo.name }}"
         uses: actions-rs/cargo@v1
         with:
-          command: test
-          args: --features ${{ matrix.features }}
+          command: ${{ matrix.cargo.cmd }}
+          args: ${{ matrix.cargo.args }}

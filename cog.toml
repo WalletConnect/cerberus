@@ -15,6 +15,8 @@ owner       = "WalletConnect"
 repository  = "cerberus"
 
 authors = [
-    { signature = "Paul Stemmet", username = "bazaah" },
-    { signature = "Fabiano Frizzo", username = "ffrizzo" }
+    { signature = "Harry Bairstow", username = "HarryET" },
+    { signature = "Derek Rein", username = "arein" },
+    { signature = "Ivan Reshetnikov", username = "heilhead" },
+    { signature = "Xavier Basty-Kjellberg", username = "xav" },
 ]

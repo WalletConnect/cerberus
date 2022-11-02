@@ -7,16 +7,12 @@ use {
 
 const INVALID_TOKEN_ERROR: &str = "invalid auth token";
 
-// #############################################################################
-
 pub type RegistryResult<T> = Result<T, RegistryError>;
 
 #[async_trait]
 pub trait RegistryClient: 'static + Send + Sync + Debug {
     async fn project_data(&self, id: &str) -> RegistryResult<Option<ProjectData>>;
 }
-
-// #############################################################################
 
 #[derive(Debug, Clone)]
 pub struct RegistryHttpClient {
