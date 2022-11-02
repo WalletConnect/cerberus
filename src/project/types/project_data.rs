@@ -1,10 +1,14 @@
 use {
-    crate::{
-        project::{error::AccessError, Origin},
-        registry::ProjectKey,
-    },
+    crate::project::{error::AccessError, Origin},
     serde::{Deserialize, Serialize},
 };
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectKey {
+    pub value: String,
+    pub is_valid: bool,
+}
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 #[serde(rename_all = "camelCase")]
