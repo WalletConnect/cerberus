@@ -2,12 +2,16 @@ name: "release"
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "main" ]
     paths-ignore:
       - '.github/**'
       - 'docs/**'
       - 'README.md'
   workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   release:
@@ -45,4 +49,4 @@ jobs:
           with:
             body_path: GITHUB_CHANGELOG.md
             tag_name: ${{ steps.release.outputs.version }}
-            token: ${{ secrets.RELEASE_TOKEN }}
+            token: ${{ secrets.GITHUB_TOKEN }}

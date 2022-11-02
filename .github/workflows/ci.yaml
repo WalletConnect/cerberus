@@ -29,54 +29,89 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  AWS_REGION: "eu-central-1"
+  RUST_BACKTRACE: full
 
 jobs:
-  tasks:
-    name: "${{ matrix.cargo.name }}"
-    runs-on: "ubuntu-latest"
+  clippy:
+    name: "Clippy (features=${{ matrix.features }})"
     strategy:
-      fail-fast: false
       matrix:
-        cargo:
-          - name: "Clippy"
-            cmd: clippy
-            args: --all-features --tests -- -D warnings
-            rust: stable
-          - name: "Formatting"
-            cmd: fmt
-            args: -- --check
-            rust: nightly
-          - name: "Unit Tests"
-            cmd: test
-            args: --all-features
-            rust: stable
-    env:
-      RUST_BACKTRACE: full
-    steps:
-      - uses: actions/checkout@v3
-      - name: Cache
-        uses: actions/cache@v3
-        continue-on-error: false
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        features: ["default", "full", "cache", "metrics"]
+    runs-on: ubuntu-latest
 
-      # Install Rust toolchain
-      - name: "Install Rust ${{ matrix.cargo.rust }}"
+    steps:
+      - name: "Git checkout"
+        uses: actions/checkout@v3
+
+      - name: "Install Rust (stable/minimal)"
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: ${{ matrix.cargo.rust }}
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: "Cache cargo registry"
+        uses: Swatinem/rust-cache@v2
+        continue-on-error: false
+
+      - name: "Clippy"
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: --features ${{ matrix.features }} --tests -- -D warnings
+
+  check-formatting:
+    name: "Check Formatting"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: "Git checkout"
+        uses: actions/checkout@v3
+
+      - name: "Install Rust (nightly/default)"
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: nightly
           profile: default
           override: true
 
-      - name: "Cargo ${{ matrix.cargo.name }}"
+      - name: "Cache cargo registry"
+        uses: Swatinem/rust-cache@v2
+        continue-on-error: false
+
+      - name: "Check Formatting "
         uses: actions-rs/cargo@v1
         with:
-          command: ${{ matrix.cargo.cmd }}
-          args: ${{ matrix.cargo.args }}
+          command: fmt
+          args: -- --check
+
+  test:
+    name: "Unit Tests (features=${{ matrix.features }})"
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        features: ["default", "full", "cache", "metrics"]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: "Git checkout"
+        uses: actions/checkout@v3
+
+      - name: "Install Rust (stable/minimal)"
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+
+      - name: "Cache cargo registry"
+        uses: Swatinem/rust-cache@v2
+        with:
+          sharedKey: "tests"
+        continue-on-error: false
+
+      - name: "Unit Tests"
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --features ${{ matrix.features }}
