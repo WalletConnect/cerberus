@@ -22,11 +22,7 @@ pub struct ProjectData {
 }
 
 impl ProjectData {
-    pub fn validate_access(
-        &self,
-        id: &str,
-        auth_origin: Option<&String>,
-    ) -> Result<(), AccessError> {
+    pub fn validate_access(&self, id: &str, auth_origin: Option<&str>) -> Result<(), AccessError> {
         // Make sure the project is not disabled globally.
         if !self.is_enabled {
             return Err(AccessError::ProjectInactive);
@@ -44,8 +40,8 @@ impl ProjectData {
         }
 
         if let Some(auth_origin) = auth_origin {
-            let auth_origin = Origin::try_from(auth_origin.as_str())
-                .map_err(|_| AccessError::OriginNotAllowed)?;
+            let auth_origin =
+                Origin::try_from(auth_origin).map_err(|_| AccessError::OriginNotAllowed)?;
             let auth_origin_host = auth_origin.hostname();
 
             const ALLOWED_LOCAL_HOSTS: [&str; 2] = ["localhost", "127.0.0.1"];
