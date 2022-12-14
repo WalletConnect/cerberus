@@ -26,7 +26,9 @@ pub struct Origin<'a> {
 
 impl<'a> Origin<'a> {
     pub fn matches(&self, other: &Origin) -> bool {
-        if self.scheme != other.scheme {
+        // if no scheme is specified allow all schemes
+        // if a scheme is specified they have to match
+        if self.scheme.is_some() && other.scheme.is_some() && self.scheme != other.scheme {
             return false;
         }
 
@@ -227,5 +229,31 @@ mod test {
         let o2 = Origin::try_from("domain.name:124").unwrap();
 
         assert!(!o1.matches(&o2));
+
+        let o1 = Origin::try_from("https://domain.name:123").unwrap();
+        let o2 = Origin::try_from("domain.name:124").unwrap();
+
+        assert!(!o1.matches(&o2));
+
+        let o1 = Origin::try_from("https://a.b.domain.name/").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name").unwrap();
+
+        assert!(!o1.matches(&o2));
+
+        let o1 = Origin::try_from("https://a.b.domain.name/").unwrap();
+        let o2 = Origin::try_from("a.b.domain.name").unwrap();
+
+        assert!(o1.matches(&o2));
+
+        let o1 = Origin::try_from("https://react-app.walletconnect.com").unwrap();
+        let o2 = Origin::try_from("react-app.walletconnect.com").unwrap();
+
+        assert!(o1.matches(&o2));
+
+        // Allow trailing slash
+        let o1 = Origin::try_from("https://react-app.walletconnect.com/").unwrap();
+        let o2 = Origin::try_from("react-app.walletconnect.com").unwrap();
+
+        assert!(o1.matches(&o2));
     }
 }
