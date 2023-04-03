@@ -2,7 +2,7 @@ use {
     crate::{project::ProjectData, registry::error::RegistryError},
     async_trait::async_trait,
     reqwest::header::{self, HeaderValue},
-    std::fmt::Debug,
+    std::{fmt::Debug, time::Duration},
 };
 
 const INVALID_TOKEN_ERROR: &str = "invalid auth token";
@@ -14,6 +14,30 @@ pub trait RegistryClient: 'static + Send + Sync + Debug {
     async fn project_data(&self, id: &str) -> RegistryResult<Option<ProjectData>>;
 }
 
+/// HTTP client configuration.
+#[derive(Debug, Clone)]
+pub struct HttpClientConfig {
+    /// Connection keep-alive timeout after being returned to the pool.
+    ///
+    /// `None` disables the timeout. Default is 90 seconds.
+    pub pool_idle_timeout: Option<Duration>,
+
+    /// Maximum number of idle connections to keep alive.
+    ///
+    /// Default is unlimited.
+    pub pool_max_idle: usize,
+}
+
+impl Default for HttpClientConfig {
+    fn default() -> Self {
+        // These defaults are taken from `reqwest` default config.
+        Self {
+            pool_idle_timeout: Some(Duration::from_secs(90)),
+            pool_max_idle: usize::MAX,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RegistryHttpClient {
     base_url: String,
@@ -22,6 +46,14 @@ pub struct RegistryHttpClient {
 
 impl RegistryHttpClient {
     pub fn new(base_url: impl Into<String>, auth_token: &str) -> RegistryResult<Self> {
+        Self::with_config(base_url, auth_token, Default::default())
+    }
+
+    pub fn with_config(
+        base_url: impl Into<String>,
+        auth_token: &str,
+        config: HttpClientConfig,
+    ) -> RegistryResult<Self> {
         let mut auth_value = HeaderValue::from_str(&format!("Bearer {}", auth_token))
             .map_err(|_| RegistryError::Config(INVALID_TOKEN_ERROR))?;
 
@@ -33,6 +65,8 @@ impl RegistryHttpClient {
 
         let http_client = reqwest::Client::builder()
             .default_headers(headers)
+            .pool_idle_timeout(config.pool_idle_timeout)
+            .pool_max_idle_per_host(config.pool_max_idle)
             .build()?;
 
         Ok(Self {
