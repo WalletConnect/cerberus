@@ -20,12 +20,12 @@ pub struct HttpClientConfig {
     /// Connection keep-alive timeout after being returned to the pool.
     ///
     /// `None` disables the timeout. Default is 90 seconds.
-    pool_idle_timeout: Option<Duration>,
+    pub pool_idle_timeout: Option<Duration>,
 
     /// Maximum number of idle connections to keep alive.
     ///
     /// Default is unlimited.
-    pool_max_idle: usize,
+    pub pool_max_idle: usize,
 }
 
 impl Default for HttpClientConfig {
