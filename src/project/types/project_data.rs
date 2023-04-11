@@ -17,10 +17,11 @@ pub struct ProjectData {
     pub name: String,
     pub push_url: Option<String>,
     pub keys: Vec<ProjectKey>,
-    pub homepage: Option<String>,
-    pub is_dns_verified: bool,
     pub is_enabled: bool,
     pub allowed_origins: Vec<String>,
+
+    #[serde(default)]
+    pub verified_domain: Option<String>,
 }
 
 impl ProjectData {
