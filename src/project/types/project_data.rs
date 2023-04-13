@@ -21,7 +21,7 @@ pub struct ProjectData {
     pub allowed_origins: Vec<String>,
 
     #[serde(default)]
-    pub verified_domain: Option<String>,
+    pub verified_domains: Vec<String>,
 }
 
 impl ProjectData {
