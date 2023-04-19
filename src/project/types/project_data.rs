@@ -19,6 +19,7 @@ pub struct ProjectData {
     pub keys: Vec<ProjectKey>,
     pub is_enabled: bool,
     pub allowed_origins: Vec<String>,
+    pub verified_domains: Vec<String>,
 }
 
 impl ProjectData {
