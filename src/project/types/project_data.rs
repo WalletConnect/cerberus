@@ -14,6 +14,7 @@ pub struct ProjectKey {
 #[serde(rename_all = "camelCase")]
 pub struct ProjectData {
     pub uuid: String,
+    pub creator: String,
     pub name: String,
     pub push_url: Option<String>,
     pub keys: Vec<ProjectKey>,
