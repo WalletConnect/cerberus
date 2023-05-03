@@ -1,7 +1,7 @@
 use {
     once_cell::sync::Lazy,
     regex::Regex,
-    std::{fmt::Display, iter::zip, str::FromStr},
+    std::{fmt::Display, iter::zip},
     thiserror::Error as ThisError,
 };
 
@@ -10,15 +10,9 @@ use {
 static ORIGIN_PARSER_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^(([^:]+)://)?([^:/]+)(:([\d]+))?").unwrap());
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum OriginScheme {
-    Http,
-    Https,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Origin<'a> {
-    scheme: Option<OriginScheme>,
+    scheme: Option<&'a str>,
     hostname: &'a str,
     hostname_parts: Vec<&'a str>,
     port: Option<u16>,
@@ -62,31 +56,8 @@ impl<'a> Origin<'a> {
 pub enum OriginParseError {
     #[error("invalid origin format")]
     InvalidFormat,
-    #[error("unsupported scheme")]
-    UnsupportedScheme,
     #[error("invalid port number")]
     InvalidPortNumber,
-}
-
-impl Display for OriginScheme {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Self::Http => "http",
-            Self::Https => "https",
-        })
-    }
-}
-
-impl FromStr for OriginScheme {
-    type Err = OriginParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "http" => Ok(Self::Http),
-            "https" => Ok(Self::Https),
-            _ => Err(OriginParseError::UnsupportedScheme),
-        }
-    }
 }
 
 impl<'a> TryFrom<&'a str> for Origin<'a> {
@@ -97,7 +68,7 @@ impl<'a> TryFrom<&'a str> for Origin<'a> {
             .captures(s)
             .ok_or(OriginParseError::InvalidFormat)?;
 
-        let scheme = caps.get(2).map(|m| m.as_str().parse()).transpose()?;
+        let scheme = caps.get(2).map(|m| m.as_str());
 
         let hostname = caps
             .get(3)
@@ -150,7 +121,7 @@ impl<'a> Display for Origin<'a> {
 
 #[cfg(test)]
 mod test {
-    use super::{Origin, OriginParseError, OriginScheme};
+    use super::{Origin, OriginParseError};
 
     #[test]
     fn parse_origin() {
@@ -177,7 +148,7 @@ mod test {
         assert_eq!(
             Origin::try_from("http://domain.name"),
             Ok(Origin {
-                scheme: Some(OriginScheme::Http),
+                scheme: Some("http"),
                 hostname: "domain.name",
                 hostname_parts: vec!["domain", "name"],
                 port: None,
@@ -187,16 +158,11 @@ mod test {
         assert_eq!(
             Origin::try_from("http://*.domain.name:123"),
             Ok(Origin {
-                scheme: Some(OriginScheme::Http),
+                scheme: Some("http"),
                 hostname: "*.domain.name",
                 hostname_parts: vec!["*", "domain", "name"],
                 port: Some(123),
             })
-        );
-
-        assert_eq!(
-            Origin::try_from("ftp://domain.name"),
-            Err(OriginParseError::UnsupportedScheme)
         );
 
         assert_eq!(
@@ -250,8 +216,14 @@ mod test {
 
         assert!(o1.matches(&o2));
 
-        // Allow trailing slash
+        // Allow trailing slash.
         let o1 = Origin::try_from("https://react-app.walletconnect.com/").unwrap();
+        let o2 = Origin::try_from("react-app.walletconnect.com").unwrap();
+
+        assert!(o1.matches(&o2));
+
+        // Allow custom schema when it's unspecified.
+        let o1 = Origin::try_from("custom-schema://react-app.walletconnect.com/").unwrap();
         let o2 = Origin::try_from("react-app.walletconnect.com").unwrap();
 
         assert!(o1.matches(&o2));
