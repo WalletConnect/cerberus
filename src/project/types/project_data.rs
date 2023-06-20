@@ -19,6 +19,7 @@ pub struct ProjectData {
     pub push_url: Option<String>,
     pub keys: Vec<ProjectKey>,
     pub is_enabled: bool,
+    pub is_rate_limited: bool,
     pub allowed_origins: Vec<String>,
     pub verified_domains: Vec<String>,
 }
