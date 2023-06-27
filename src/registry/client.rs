@@ -26,6 +26,14 @@ pub struct HttpClientConfig {
     ///
     /// Default is unlimited.
     pub pool_max_idle: usize,
+
+    /// Enables a request timeout.
+    ///
+    /// The timeout is applied for both the connect phase of a `Client`, and for
+    /// fully receiving response body.
+    ///
+    /// Default is no timeout.
+    pub timeout: Option<Duration>,
 }
 
 impl Default for HttpClientConfig {
@@ -34,6 +42,7 @@ impl Default for HttpClientConfig {
         Self {
             pool_idle_timeout: Some(Duration::from_secs(90)),
             pool_max_idle: usize::MAX,
+            timeout: None,
         }
     }
 }
@@ -63,15 +72,18 @@ impl RegistryHttpClient {
         let mut headers = header::HeaderMap::new();
         headers.insert(header::AUTHORIZATION, auth_value);
 
-        let http_client = reqwest::Client::builder()
+        let mut http_client = reqwest::Client::builder()
             .default_headers(headers)
             .pool_idle_timeout(config.pool_idle_timeout)
-            .pool_max_idle_per_host(config.pool_max_idle)
-            .build()?;
+            .pool_max_idle_per_host(config.pool_max_idle);
+
+        if let Some(timeout) = config.timeout {
+            http_client = http_client.connect_timeout(timeout).timeout(timeout);
+        }
 
         Ok(Self {
             base_url: base_url.into(),
-            http_client,
+            http_client: http_client.build()?,
         })
     }
 }
