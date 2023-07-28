@@ -102,10 +102,19 @@ impl RegistryClient for RegistryHttpClient {
 }
 
 async fn parse_http_response(resp: reqwest::Response) -> RegistryResult<Option<ProjectData>> {
-    match resp.status().as_u16() {
+    let status = resp.status();
+    match status.as_u16() {
         200..=299 => Ok(Some(resp.json().await?)),
         403 => Err(RegistryError::Config(INVALID_TOKEN_ERROR)),
         404 => Ok(None),
-        _ => Err(RegistryError::Response(resp.status().to_string())),
+        400 if resp
+            .text()
+            .await
+            // https://github.com/WalletConnect/explorer-api/blob/316f07d4657ccba9ef8d67e2ab06b75a33d4e3ed/src/controllers/internal/getProjectData.ts#L29C27-L29C44
+            .is_ok_and(|text| text.contains("Invalid projectId")) =>
+        {
+            Ok(None)
+        }
+        _ => Err(RegistryError::Response(status.to_string())),
     }
 }
