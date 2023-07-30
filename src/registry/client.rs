@@ -127,3 +127,136 @@ async fn parse_http_response(resp: reqwest::Response) -> RegistryResult<Option<P
         ))),
     }
 }
+
+#[cfg(test)]
+mod test {
+    use {
+        super::*,
+        wiremock::{
+            http::Method,
+            matchers::{method, path},
+            Mock,
+            MockServer,
+            ResponseTemplate,
+        },
+    };
+
+    fn mock_project_data() -> ProjectData {
+        ProjectData {
+            uuid: "".to_owned(),
+            creator: "".to_owned(),
+            name: "".to_owned(),
+            push_url: None,
+            keys: vec![],
+            is_enabled: false,
+            is_verify_enabled: false,
+            is_rate_limited: false,
+            allowed_origins: vec![],
+            verified_domains: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn project_exists() {
+        let project_id = "a".repeat(32);
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method(Method::Get))
+            .and(path(format!("/internal/project/key/{project_id}")))
+            .respond_with(ResponseTemplate::new(StatusCode::OK).set_body_json(mock_project_data()))
+            .mount(&mock_server)
+            .await;
+
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth")
+            .unwrap()
+            .project_data(&project_id)
+            .await
+            .unwrap();
+        assert!(response.is_some());
+    }
+
+    #[tokio::test]
+    async fn project_id_invalid_register() {
+        let project_id = "a".repeat(32);
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method(Method::Get))
+            .and(path(format!("/internal/project/key/{project_id}")))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth")
+            .unwrap()
+            .project_data(&project_id)
+            .await
+            .unwrap();
+        assert!(response.is_none());
+    }
+
+    #[tokio::test]
+    async fn project_id_invalid_len() {
+        let project_id = "a".repeat(31);
+
+        let mock_server = MockServer::start().await;
+
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth")
+            .unwrap()
+            .project_data(&project_id)
+            .await
+            .unwrap();
+        assert!(response.is_none());
+    }
+
+    #[tokio::test]
+    async fn project_id_invalid_len_long() {
+        let project_id = "a".repeat(33);
+
+        let mock_server = MockServer::start().await;
+
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth")
+            .unwrap()
+            .project_data(&project_id)
+            .await
+            .unwrap();
+        assert!(response.is_none());
+    }
+
+    #[tokio::test]
+    async fn project_id_invalid_hex() {
+        let project_id = "z".repeat(32);
+
+        let mock_server = MockServer::start().await;
+
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth")
+            .unwrap()
+            .project_data(&project_id)
+            .await
+            .unwrap();
+        assert!(response.is_none());
+    }
+
+    #[tokio::test]
+    async fn invalid_auth() {
+        let project_id = "a".repeat(32);
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method(Method::Get))
+            .and(path(format!("/internal/project/key/{project_id}")))
+            .respond_with(ResponseTemplate::new(StatusCode::FORBIDDEN))
+            .mount(&mock_server)
+            .await;
+
+        let result = RegistryHttpClient::new(mock_server.uri(), "auth")
+            .unwrap()
+            .project_data(&project_id)
+            .await;
+        assert!(matches!(
+            result,
+            RegistryResult::Err(RegistryError::Config(INVALID_TOKEN_ERROR))
+        ));
+    }
+}
