@@ -1,7 +1,10 @@
 use {
     crate::{project::ProjectData, registry::error::RegistryError},
     async_trait::async_trait,
-    reqwest::header::{self, HeaderValue},
+    reqwest::{
+        header::{self, HeaderValue},
+        StatusCode,
+    },
     std::{fmt::Debug, time::Duration},
 };
 
@@ -90,31 +93,37 @@ impl RegistryHttpClient {
 
 #[async_trait]
 impl RegistryClient for RegistryHttpClient {
-    async fn project_data(&self, id: &str) -> RegistryResult<Option<ProjectData>> {
-        let resp = self
-            .http_client
-            .get(format!("{}/internal/project/key/{id}", self.base_url))
-            .send()
-            .await?;
+    async fn project_data(&self, project_id: &str) -> RegistryResult<Option<ProjectData>> {
+        if !is_valid_project_id(project_id) {
+            return Ok(None);
+        }
+
+        let url = format!("{}/internal/project/key/{project_id}", self.base_url);
+        let resp = self.http_client.get(url).send().await?;
 
         parse_http_response(resp).await
     }
 }
 
+/// Checks if the project ID is formatted properly. It must be 32 hex
+/// characters.
+fn is_valid_project_id(project_id: &str) -> bool {
+    project_id.len() == 32 && is_hex_string(project_id)
+}
+
+fn is_hex_string(string: &str) -> bool {
+    string.chars().all(|c| c.is_ascii_hexdigit())
+}
+
 async fn parse_http_response(resp: reqwest::Response) -> RegistryResult<Option<ProjectData>> {
-    let status = resp.status();
-    match status.as_u16() {
-        200..=299 => Ok(Some(resp.json().await?)),
-        403 => Err(RegistryError::Config(INVALID_TOKEN_ERROR)),
-        404 => Ok(None),
-        400 if resp
-            .text()
-            .await
-            // https://github.com/WalletConnect/explorer-api/blob/316f07d4657ccba9ef8d67e2ab06b75a33d4e3ed/src/controllers/internal/getProjectData.ts#L29C27-L29C44
-            .is_ok_and(|text| text.contains("Invalid projectId")) =>
-        {
-            Ok(None)
-        }
-        _ => Err(RegistryError::Response(status.to_string())),
+    match resp.status() {
+        code if code.is_success() => Ok(Some(resp.json().await?)),
+        StatusCode::FORBIDDEN => Err(RegistryError::Config(INVALID_TOKEN_ERROR)),
+        StatusCode::NOT_FOUND => Ok(None),
+        _ => Err(RegistryError::Response(format!(
+            "status={} body={:?}",
+            resp.status(),
+            resp.text().await
+        ))),
     }
 }
