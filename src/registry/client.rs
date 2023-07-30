@@ -116,13 +116,13 @@ fn is_hex_string(string: &str) -> bool {
 }
 
 async fn parse_http_response(resp: reqwest::Response) -> RegistryResult<Option<ProjectData>> {
-    match resp.status() {
+    let status = resp.status();
+    match status {
         code if code.is_success() => Ok(Some(resp.json().await?)),
         StatusCode::FORBIDDEN => Err(RegistryError::Config(INVALID_TOKEN_ERROR)),
         StatusCode::NOT_FOUND => Ok(None),
         _ => Err(RegistryError::Response(format!(
-            "status={} body={:?}",
-            resp.status(),
+            "status={status} body={:?}",
             resp.text().await
         ))),
     }
