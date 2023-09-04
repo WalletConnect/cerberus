@@ -23,6 +23,15 @@ pub struct ProjectData {
     pub is_rate_limited: bool,
     pub allowed_origins: Vec<String>,
     pub verified_domains: Vec<String>,
+    pub quota: Quota,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Quota {
+    pub max: u64,
+    pub current: u64,
+    pub is_valid: bool,
 }
 
 impl ProjectData {

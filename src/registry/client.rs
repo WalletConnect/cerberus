@@ -132,6 +132,7 @@ async fn parse_http_response(resp: reqwest::Response) -> RegistryResult<Option<P
 mod test {
     use {
         super::*,
+        crate::project,
         wiremock::{
             http::Method,
             matchers::{method, path},
@@ -153,6 +154,11 @@ mod test {
             is_rate_limited: false,
             allowed_origins: vec![],
             verified_domains: vec![],
+            quota: project::Quota {
+                max: 42,
+                current: 1,
+                is_valid: true,
+            },
         }
     }
 
