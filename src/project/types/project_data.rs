@@ -1,5 +1,5 @@
 use {
-    crate::project::{error::AccessError, Origin},
+    crate::project::{error::AccessError, MatchingPolicy, Origin},
     serde::{Deserialize, Serialize},
 };
 
@@ -36,6 +36,15 @@ pub struct Quota {
 
 impl ProjectData {
     pub fn validate_access(&self, id: &str, auth_origin: Option<&str>) -> Result<(), AccessError> {
+        self.validate_access_opt(id, auth_origin, MatchingPolicy::default())
+    }
+
+    pub fn validate_access_opt(
+        &self,
+        id: &str,
+        auth_origin: Option<&str>,
+        matching_policy: MatchingPolicy,
+    ) -> Result<(), AccessError> {
         // Make sure the project is not disabled globally.
         if !self.is_enabled {
             return Err(AccessError::ProjectInactive);
@@ -68,7 +77,7 @@ impl ProjectData {
             for origin in &self.allowed_origins {
                 // Having a malformed entry in the allow list is okay. We'll just ignore it.
                 if let Ok(origin) = Origin::try_from(origin.as_str()) {
-                    if origin.matches(&auth_origin) {
+                    if origin.matches_opt(&auth_origin, matching_policy) {
                         // Found a match, grant access.
                         return Ok(());
                     }

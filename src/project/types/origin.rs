@@ -1,7 +1,12 @@
 use {
+    bitflags::bitflags,
     once_cell::sync::Lazy,
     regex::Regex,
-    std::{fmt::Display, iter::zip},
+    std::{
+        fmt::Display,
+        iter::{zip, Rev, Zip},
+        slice::Iter,
+    },
     thiserror::Error as ThisError,
 };
 
@@ -10,6 +15,27 @@ use {
 static ORIGIN_PARSER_REGEX: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"^(([^:]+)://)?([^:/]+)(:([\d]+))?").unwrap());
 
+bitflags! {
+    /// Values used to configure the origin matching behavior.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct MatchingPolicy: u32 {
+        const CheckScheme        = 0b000001;
+        const CheckPort          = 0b000010;
+
+        const CheckAll           = Self::CheckScheme.bits() | Self::CheckPort.bits();
+
+        const AllowBundleID      = 0b001000;
+        const AllowEmptyScheme   = 0b010000;
+        const AllowEmptyPort     = 0b100000;
+        }
+}
+
+impl Default for MatchingPolicy {
+    fn default() -> Self {
+        Self::CheckAll | Self::AllowEmptyScheme
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Origin<'a> {
     scheme: Option<&'a str>,
@@ -17,6 +43,8 @@ pub struct Origin<'a> {
     hostname_parts: Vec<&'a str>,
     port: Option<u16>,
 }
+
+const WILDCARD: &str = "*";
 
 impl<'a> Origin<'a> {
     pub fn matches(&self, other: &Origin) -> bool {
@@ -35,7 +63,7 @@ impl<'a> Origin<'a> {
         }
 
         for (&this, &other) in zip(&self.hostname_parts, &other.hostname_parts) {
-            if this == "*" {
+            if this == WILDCARD {
                 continue;
             }
 
@@ -45,6 +73,59 @@ impl<'a> Origin<'a> {
         }
 
         true
+    }
+
+    pub fn matches_opt(&self, other: &Origin, policy: MatchingPolicy) -> bool {
+        if policy.contains(MatchingPolicy::CheckScheme) {
+            if policy.contains(MatchingPolicy::AllowEmptyScheme) {
+                if self.scheme.is_some() && other.scheme.is_some() && self.scheme != other.scheme {
+                    return false;
+                }
+            } else if self.scheme != other.scheme {
+                return false;
+            }
+        }
+
+        if policy.contains(MatchingPolicy::CheckPort) {
+            if policy.contains(MatchingPolicy::AllowEmptyPort) {
+                if self.port.is_some() && other.port.is_some() && self.port != other.port {
+                    return false;
+                }
+            } else if self.port != other.port {
+                return false;
+            }
+        }
+
+        if self.hostname_parts.len() != other.hostname_parts.len() {
+            return false;
+        }
+
+        let match_domain =
+            zip(&self.hostname_parts, &other.hostname_parts).fold(true, |res, (this, other)| {
+                if this == &WILDCARD {
+                    res
+                } else {
+                    res && this == other
+                }
+            });
+
+        let match_bundle_id = if policy.contains(MatchingPolicy::AllowBundleID) {
+            let x = &other.hostname_parts;
+            let ot = x.iter().rev();
+            let zip1: Zip<Iter<&str>, Rev<Iter<&str>>> = zip(&self.hostname_parts, ot);
+
+            zip1.fold(true, |res, (this, other)| {
+                if this == &WILDCARD {
+                    res
+                } else {
+                    res && this == other
+                }
+            })
+        } else {
+            false
+        };
+
+        match_domain || match_bundle_id
     }
 
     pub fn hostname(&self) -> &str {
@@ -121,7 +202,10 @@ impl<'a> Display for Origin<'a> {
 
 #[cfg(test)]
 mod test {
-    use super::{Origin, OriginParseError};
+    use {
+        super::{Origin, OriginParseError},
+        crate::project::MatchingPolicy,
+    };
 
     #[test]
     fn parse_origin() {
@@ -227,5 +311,285 @@ mod test {
         let o2 = Origin::try_from("react-app.walletconnect.com").unwrap();
 
         assert!(o1.matches(&o2));
+    }
+
+    #[test]
+    fn origin_matching_opt_default() {
+        let o1 = Origin::try_from("http://a.*.domain.name:123").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name:123").unwrap();
+
+        assert!(o1.matches_opt(&o2, MatchingPolicy::default()));
+
+        let o1 = Origin::try_from("domain.name").unwrap();
+        let o2 = Origin::try_from("domain.name").unwrap();
+
+        assert!(o1.matches_opt(&o2, MatchingPolicy::default()));
+
+        let o1 = Origin::try_from("https://a.b.domain.name").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name").unwrap();
+
+        assert!(!o1.matches_opt(&o2, MatchingPolicy::default()));
+
+        let o1 = Origin::try_from("domain.name:123").unwrap();
+        let o2 = Origin::try_from("domain.name:124").unwrap();
+
+        assert!(!o1.matches_opt(&o2, MatchingPolicy::default()));
+
+        let o1 = Origin::try_from("https://domain.name:123").unwrap();
+        let o2 = Origin::try_from("domain.name:124").unwrap();
+
+        assert!(!o1.matches_opt(&o2, MatchingPolicy::default()));
+
+        let o1 = Origin::try_from("https://a.b.domain.name/").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name").unwrap();
+
+        assert!(!o1.matches_opt(&o2, MatchingPolicy::default()));
+
+        let o1 = Origin::try_from("https://a.b.domain.name/").unwrap();
+        let o2 = Origin::try_from("a.b.domain.name").unwrap();
+
+        assert!(o1.matches_opt(&o2, MatchingPolicy::default()));
+
+        let o1 = Origin::try_from("https://react-app.walletconnect.com").unwrap();
+        let o2 = Origin::try_from("react-app.walletconnect.com").unwrap();
+
+        assert!(o1.matches_opt(&o2, MatchingPolicy::default()));
+
+        // Allow trailing slash.
+        let o1 = Origin::try_from("https://react-app.walletconnect.com/").unwrap();
+        let o2 = Origin::try_from("react-app.walletconnect.com").unwrap();
+
+        assert!(o1.matches_opt(&o2, MatchingPolicy::default()));
+
+        // Allow custom schema when it's unspecified.
+        let o1 = Origin::try_from("custom-schema://react-app.walletconnect.com/").unwrap();
+        let o2 = Origin::try_from("react-app.walletconnect.com").unwrap();
+
+        assert!(o1.matches_opt(&o2, MatchingPolicy::default()));
+    }
+
+    #[test]
+    fn origin_matching_opt_scheme() {
+        let o1 = Origin::try_from("http://a.*.domain.name:123").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name:123").unwrap();
+        assert!(o1.matches_opt(&o2, MatchingPolicy::CheckScheme));
+
+        let o1 = Origin::try_from("http://a.*.domain.name:123").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name:456").unwrap();
+        assert!(o1.matches_opt(&o2, MatchingPolicy::CheckScheme));
+
+        let o1 = Origin::try_from("http://a.b.domain.name:123").unwrap();
+        let o2 = Origin::try_from("https://a.b.domain.name:123").unwrap();
+        assert!(!o1.matches_opt(&o2, MatchingPolicy::CheckScheme));
+
+        let o1 = Origin::try_from("a.b.domain.name:123").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name:123").unwrap();
+        assert!(!o1.matches_opt(&o2, MatchingPolicy::CheckScheme));
+
+        let o1 = Origin::try_from("http://a.b.domain.name:123").unwrap();
+        let o2 = Origin::try_from("a.b.domain.name:123").unwrap();
+        assert!(!o1.matches_opt(&o2, MatchingPolicy::CheckScheme));
+
+        let o1 = Origin::try_from("http://a.*.domain.name:123").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name:123").unwrap();
+        assert!(o1.matches_opt(
+            &o2,
+            MatchingPolicy::CheckScheme | MatchingPolicy::AllowEmptyScheme
+        ));
+
+        let o1 = Origin::try_from("http://a.*.domain.name:123").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name:456").unwrap();
+        assert!(o1.matches_opt(
+            &o2,
+            MatchingPolicy::CheckScheme | MatchingPolicy::AllowEmptyScheme
+        ));
+
+        let o1 = Origin::try_from("http://a.b.domain.name:123").unwrap();
+        let o2 = Origin::try_from("https://a.b.domain.name:123").unwrap();
+        assert!(!o1.matches_opt(
+            &o2,
+            MatchingPolicy::CheckScheme | MatchingPolicy::AllowEmptyScheme
+        ));
+
+        let o1 = Origin::try_from("a.b.domain.name:123").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name:123").unwrap();
+        assert!(o1.matches_opt(
+            &o2,
+            MatchingPolicy::CheckScheme | MatchingPolicy::AllowEmptyScheme
+        ));
+
+        let o1 = Origin::try_from("http://a.b.domain.name:123").unwrap();
+        let o2 = Origin::try_from("a.b.domain.name:123").unwrap();
+        assert!(o1.matches_opt(
+            &o2,
+            MatchingPolicy::CheckScheme | MatchingPolicy::AllowEmptyScheme
+        ));
+    }
+
+    #[test]
+    fn origin_matching_opt_port() {
+        let o1 = Origin::try_from("http://a.*.domain.name:123").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name:123").unwrap();
+        assert!(o1.matches_opt(&o2, MatchingPolicy::CheckPort));
+
+        let o1 = Origin::try_from("http://a.*.domain.name:123").unwrap();
+        let o2 = Origin::try_from("https://a.b.domain.name:123").unwrap();
+        assert!(o1.matches_opt(&o2, MatchingPolicy::CheckPort));
+
+        let o1 = Origin::try_from("http://a.b.domain.name:123").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name:456").unwrap();
+        assert!(!o1.matches_opt(&o2, MatchingPolicy::CheckPort));
+
+        let o1 = Origin::try_from("http://a.b.domain.name").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name:123").unwrap();
+        assert!(!o1.matches_opt(&o2, MatchingPolicy::CheckPort));
+
+        let o1 = Origin::try_from("http://a.b.domain.name:123").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name").unwrap();
+        assert!(!o1.matches_opt(&o2, MatchingPolicy::CheckPort));
+
+        let o1 = Origin::try_from("http://a.*.domain.name:123").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name:123").unwrap();
+        assert!(o1.matches_opt(
+            &o2,
+            MatchingPolicy::CheckPort | MatchingPolicy::AllowEmptyPort
+        ));
+
+        let o1 = Origin::try_from("http://a.*.domain.name:123").unwrap();
+        let o2 = Origin::try_from("https://a.b.domain.name:123").unwrap();
+        assert!(o1.matches_opt(
+            &o2,
+            MatchingPolicy::CheckPort | MatchingPolicy::AllowEmptyPort
+        ));
+
+        let o1 = Origin::try_from("http://a.b.domain.name:123").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name:456").unwrap();
+        assert!(!o1.matches_opt(
+            &o2,
+            MatchingPolicy::CheckPort | MatchingPolicy::AllowEmptyPort
+        ));
+
+        let o1 = Origin::try_from("http://a.b.domain.name").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name:123").unwrap();
+        assert!(o1.matches_opt(
+            &o2,
+            MatchingPolicy::CheckPort | MatchingPolicy::AllowEmptyPort
+        ));
+
+        let o1 = Origin::try_from("http://a.b.domain.name:123").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name").unwrap();
+        assert!(o1.matches_opt(
+            &o2,
+            MatchingPolicy::CheckPort | MatchingPolicy::AllowEmptyPort
+        ));
+    }
+
+    #[test]
+    fn origin_matching_opt_bundle_id() {
+        let o1 = Origin::try_from("http://a.*.domain.name:123").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name:123").unwrap();
+
+        assert!(o1.matches_opt(
+            &o2,
+            MatchingPolicy::default() | MatchingPolicy::AllowBundleID
+        ));
+
+        let o1 = Origin::try_from("domain.name").unwrap();
+        let o2 = Origin::try_from("domain.name").unwrap();
+
+        assert!(o1.matches_opt(
+            &o2,
+            MatchingPolicy::default() | MatchingPolicy::AllowBundleID
+        ));
+
+        let o1 = Origin::try_from("https://a.b.domain.name").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name").unwrap();
+
+        assert!(!o1.matches_opt(
+            &o2,
+            MatchingPolicy::default() | MatchingPolicy::AllowBundleID
+        ));
+
+        let o1 = Origin::try_from("domain.name:123").unwrap();
+        let o2 = Origin::try_from("domain.name:124").unwrap();
+
+        assert!(!o1.matches_opt(
+            &o2,
+            MatchingPolicy::default() | MatchingPolicy::AllowBundleID
+        ));
+
+        let o1 = Origin::try_from("https://domain.name:123").unwrap();
+        let o2 = Origin::try_from("domain.name:124").unwrap();
+
+        assert!(!o1.matches_opt(
+            &o2,
+            MatchingPolicy::default() | MatchingPolicy::AllowBundleID
+        ));
+
+        let o1 = Origin::try_from("https://a.b.domain.name/").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name").unwrap();
+
+        assert!(!o1.matches_opt(
+            &o2,
+            MatchingPolicy::default() | MatchingPolicy::AllowBundleID
+        ));
+
+        let o1 = Origin::try_from("https://a.b.domain.name/").unwrap();
+        let o2 = Origin::try_from("a.b.domain.name").unwrap();
+
+        assert!(o1.matches_opt(
+            &o2,
+            MatchingPolicy::default() | MatchingPolicy::AllowBundleID
+        ));
+
+        let o1 = Origin::try_from("https://react-app.walletconnect.com").unwrap();
+        let o2 = Origin::try_from("react-app.walletconnect.com").unwrap();
+
+        assert!(o1.matches_opt(
+            &o2,
+            MatchingPolicy::default() | MatchingPolicy::AllowBundleID
+        ));
+
+        // Allow trailing slash.
+        let o1 = Origin::try_from("https://react-app.walletconnect.com/").unwrap();
+        let o2 = Origin::try_from("react-app.walletconnect.com").unwrap();
+
+        assert!(o1.matches_opt(
+            &o2,
+            MatchingPolicy::default() | MatchingPolicy::AllowBundleID
+        ));
+
+        // Allow custom schema when it's unspecified.
+        let o1 = Origin::try_from("custom-schema://react-app.walletconnect.com/").unwrap();
+        let o2 = Origin::try_from("react-app.walletconnect.com").unwrap();
+
+        assert!(o1.matches_opt(
+            &o2,
+            MatchingPolicy::default() | MatchingPolicy::AllowBundleID
+        ));
+
+        let o1 = Origin::try_from("http://a.b.domain.name").unwrap();
+        let o2 = Origin::try_from("http://a.b.domain.name").unwrap();
+
+        assert!(o1.matches_opt(
+            &o2,
+            MatchingPolicy::default() | MatchingPolicy::AllowBundleID
+        ));
+
+        let o1 = Origin::try_from("http://a.b.domain.name").unwrap();
+        let o2 = Origin::try_from("http://name.domain.b.a").unwrap();
+
+        assert!(o1.matches_opt(
+            &o2,
+            MatchingPolicy::default() | MatchingPolicy::AllowBundleID
+        ));
+
+        let o1 = Origin::try_from("http://a.b.domain.name").unwrap();
+        let o2 = Origin::try_from("name.domain.b.a").unwrap();
+
+        assert!(o1.matches_opt(
+            &o2,
+            MatchingPolicy::default() | MatchingPolicy::AllowBundleID
+        ));
     }
 }
