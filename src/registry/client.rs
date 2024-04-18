@@ -154,6 +154,8 @@ mod test {
             is_rate_limited: false,
             allowed_origins: vec![],
             verified_domains: vec![],
+            bundle_ids: vec![],
+            package_names: vec![],
             quota: project::Quota {
                 max: 42,
                 current: 1,
