@@ -66,7 +66,7 @@ impl ProjectData {
                 Origin::try_from(auth_origin).map_err(|_| AccessError::OriginNotAllowed)?;
 
             match source {
-                OriginSource::Header => self.valiadte_origin_header(&auth_origin, true),
+                OriginSource::Header => self.validate_origin_header(&auth_origin, true),
                 OriginSource::BundleId => self.validate_origin(&auth_origin, &self.bundle_ids),
                 OriginSource::PackageName => {
                     self.validate_origin(&auth_origin, &self.package_names)
@@ -78,7 +78,7 @@ impl ProjectData {
         }
     }
 
-    fn valiadte_origin_header(
+    fn validate_origin_header(
         &self,
         auth_origin: &Origin<'_>,
         allow_empty: bool,
@@ -136,7 +136,7 @@ impl ProjectData {
 
         // If we couldn't match, fallback to matching against `allowed_origins` list for
         // backwards compatibility.
-        self.valiadte_origin_header(auth_origin, false)
+        self.validate_origin_header(auth_origin, false)
     }
 }
 
