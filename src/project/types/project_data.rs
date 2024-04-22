@@ -47,8 +47,7 @@ impl ProjectData {
     pub fn validate_access(
         &self,
         id: &str,
-        origin: Option<&str>,
-        source: OriginSource,
+        origin: Option<(&str, OriginSource)>,
     ) -> Result<(), AccessError> {
         // Make sure the project is not disabled globally.
         if !self.is_enabled {
@@ -61,7 +60,7 @@ impl ProjectData {
             .position(|key| key.value == id && key.is_valid)
             .ok_or(AccessError::KeyInvalid)?;
 
-        if let Some(origin) = origin {
+        if let Some((origin, source)) = origin {
             let origin = Origin::try_from(origin).map_err(|_| AccessError::OriginNotAllowed)?;
 
             match source {
@@ -172,69 +171,69 @@ mod test {
         };
 
         assert!(project
-            .validate_access("test", Some("invalid.host.com"), OriginSource::Header)
+            .validate_access("test", Some(("invalid.host.com", OriginSource::Header)))
             .is_err());
         assert!(project
-            .validate_access("test", Some("invalid.host.com"), OriginSource::BundleId)
+            .validate_access("test", Some(("invalid.host.com", OriginSource::BundleId)))
             .is_err());
         assert!(project
-            .validate_access("test", Some("invalid.host.com"), OriginSource::PackageName)
+            .validate_access(
+                "test",
+                Some(("invalid.host.com", OriginSource::PackageName))
+            )
             .is_err());
 
         assert!(project
             .validate_access(
                 "test",
-                Some("prod.header.example.com"),
-                OriginSource::Header
+                Some(("prod.header.example.com", OriginSource::Header)),
             )
             .is_ok());
         assert!(project
             .validate_access(
                 "test",
-                Some("com.example.header.prod"),
-                OriginSource::Header
+                Some(("com.example.header.prod", OriginSource::Header)),
             )
             .is_ok());
         assert!(project
             .validate_access(
                 "test",
-                Some("prod.header.example.com"),
-                OriginSource::BundleId
+                Some(("prod.header.example.com", OriginSource::BundleId)),
             )
             .is_err());
         assert!(project
             .validate_access(
                 "test",
-                Some("prod.header.example.com"),
-                OriginSource::PackageName
+                Some(("prod.header.example.com", OriginSource::PackageName)),
             )
             .is_err());
 
         assert!(project
-            .validate_access("test", Some("com.example.bundle"), OriginSource::Header)
+            .validate_access("test", Some(("com.example.bundle", OriginSource::Header)))
             .is_err());
         assert!(project
-            .validate_access("test", Some("com.example.bundle"), OriginSource::BundleId)
+            .validate_access("test", Some(("com.example.bundle", OriginSource::BundleId)))
             .is_ok());
         assert!(project
             .validate_access(
                 "test",
-                Some("com.example.bundle"),
-                OriginSource::PackageName
+                Some(("com.example.bundle", OriginSource::PackageName))
             )
             .is_err());
 
         assert!(project
-            .validate_access("test", Some("com.example.package"), OriginSource::Header)
-            .is_err());
-        assert!(project
-            .validate_access("test", Some("com.example.package"), OriginSource::BundleId)
+            .validate_access("test", Some(("com.example.package", OriginSource::Header)))
             .is_err());
         assert!(project
             .validate_access(
                 "test",
-                Some("com.example.package"),
-                OriginSource::PackageName
+                Some(("com.example.package", OriginSource::BundleId))
+            )
+            .is_err());
+        assert!(project
+            .validate_access(
+                "test",
+                Some(("com.example.package", OriginSource::PackageName)),
             )
             .is_ok());
 
@@ -262,13 +261,16 @@ mod test {
         };
 
         assert!(project
-            .validate_access("test", Some("invalid.host.com"), OriginSource::Header)
+            .validate_access("test", Some(("invalid.host.com", OriginSource::Header)))
             .is_ok());
         assert!(project
-            .validate_access("test", Some("invalid.host.com"), OriginSource::BundleId)
+            .validate_access("test", Some(("invalid.host.com", OriginSource::BundleId)))
             .is_ok());
         assert!(project
-            .validate_access("test", Some("invalid.host.com"), OriginSource::PackageName)
+            .validate_access(
+                "test",
+                Some(("invalid.host.com", OriginSource::PackageName))
+            )
             .is_ok());
     }
 }
