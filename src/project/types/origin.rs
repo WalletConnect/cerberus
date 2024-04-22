@@ -2,7 +2,6 @@ use {
     once_cell::sync::Lazy,
     regex::Regex,
     std::{fmt::Display, iter::zip},
-    thiserror::Error as ThisError,
 };
 
 /// Simplified URL parser regex. Extracts only the scheme (optional), hostname
@@ -72,7 +71,7 @@ fn match_fold_cb(res: bool, (this, other): (&&str, &&str)) -> bool {
     }
 }
 
-#[derive(Debug, ThisError, PartialEq, Eq)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum OriginParseError {
     #[error("invalid origin format")]
     InvalidFormat,
