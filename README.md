@@ -5,5 +5,5 @@ Check project IDs against the WalletConnect registry
 ## Dev loop
 
 ```bash
-just amigood
+just devloop
 ```
