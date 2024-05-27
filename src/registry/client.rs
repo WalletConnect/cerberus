@@ -1,10 +1,16 @@
 use {
-    crate::{project::ProjectData, registry::error::RegistryError},
+    crate::{
+        project::{ProjectData, ProjectDataWithQuota},
+        registry::error::RegistryError,
+    },
     async_trait::async_trait,
     reqwest::{
         header::{self, HeaderValue},
+        IntoUrl,
         StatusCode,
+        Url,
     },
+    serde::de::DeserializeOwned,
     std::{fmt::Debug, time::Duration},
 };
 
@@ -15,6 +21,10 @@ pub type RegistryResult<T> = Result<T, RegistryError>;
 #[async_trait]
 pub trait RegistryClient: 'static + Send + Sync + Debug {
     async fn project_data(&self, id: &str) -> RegistryResult<Option<ProjectData>>;
+    async fn project_data_with_quota(
+        &self,
+        id: &str,
+    ) -> RegistryResult<Option<ProjectDataWithQuota>>;
 }
 
 /// HTTP client configuration.
@@ -52,17 +62,17 @@ impl Default for HttpClientConfig {
 
 #[derive(Debug, Clone)]
 pub struct RegistryHttpClient {
-    base_url: String,
+    base_url: Url,
     http_client: reqwest::Client,
 }
 
 impl RegistryHttpClient {
-    pub fn new(base_url: impl Into<String>, auth_token: &str) -> RegistryResult<Self> {
+    pub fn new(base_url: impl IntoUrl, auth_token: &str) -> RegistryResult<Self> {
         Self::with_config(base_url, auth_token, Default::default())
     }
 
     pub fn with_config(
-        base_url: impl Into<String>,
+        base_url: impl IntoUrl,
         auth_token: &str,
         config: HttpClientConfig,
     ) -> RegistryResult<Self> {
@@ -85,24 +95,53 @@ impl RegistryHttpClient {
         }
 
         Ok(Self {
-            base_url: base_url.into(),
-            http_client: http_client.build()?,
+            base_url: base_url.into_url().map_err(RegistryError::BaseUrlIntoUrl)?,
+            http_client: http_client.build().map_err(RegistryError::BuildClient)?,
         })
+    }
+
+    async fn project_data_impl<T: DeserializeOwned>(
+        &self,
+        project_id: &str,
+        quota: bool,
+    ) -> RegistryResult<Option<T>> {
+        if !is_valid_project_id(project_id) {
+            return Ok(None);
+        }
+
+        let url = build_url(&self.base_url, project_id, quota).map_err(RegistryError::UrlBuild)?;
+
+        let resp = self
+            .http_client
+            .get(url)
+            .send()
+            .await
+            .map_err(RegistryError::Transport)?;
+
+        parse_http_response(resp).await
     }
 }
 
 #[async_trait]
 impl RegistryClient for RegistryHttpClient {
     async fn project_data(&self, project_id: &str) -> RegistryResult<Option<ProjectData>> {
-        if !is_valid_project_id(project_id) {
-            return Ok(None);
-        }
-
-        let url = format!("{}/internal/project/key/{project_id}", self.base_url);
-        let resp = self.http_client.get(url).send().await?;
-
-        parse_http_response(resp).await
+        self.project_data_impl(project_id, false).await
     }
+
+    async fn project_data_with_quota(
+        &self,
+        project_id: &str,
+    ) -> RegistryResult<Option<ProjectDataWithQuota>> {
+        self.project_data_impl(project_id, true).await
+    }
+}
+
+fn build_url(base_url: &Url, project_id: &str, quota: bool) -> Result<Url, url::ParseError> {
+    let mut url = base_url.join(&format!("/internal/project/key/{project_id}"))?;
+    if quota {
+        url.query_pairs_mut().append_pair("quota", "true");
+    }
+    Ok(url)
 }
 
 /// Checks if the project ID is formatted properly. It must be 32 hex
@@ -115,10 +154,16 @@ fn is_hex_string(string: &str) -> bool {
     string.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-async fn parse_http_response(resp: reqwest::Response) -> RegistryResult<Option<ProjectData>> {
+async fn parse_http_response<T: DeserializeOwned>(
+    resp: reqwest::Response,
+) -> RegistryResult<Option<T>> {
     let status = resp.status();
     match status {
-        code if code.is_success() => Ok(Some(resp.json().await?)),
+        code if code.is_success() => Ok(Some(
+            resp.json()
+                .await
+                .map_err(RegistryError::ResponseJsonParse)?,
+        )),
         StatusCode::FORBIDDEN => Err(RegistryError::Config(INVALID_TOKEN_ERROR)),
         StatusCode::NOT_FOUND => Ok(None),
         _ => Err(RegistryError::Response(format!(
@@ -132,10 +177,10 @@ async fn parse_http_response(resp: reqwest::Response) -> RegistryResult<Option<P
 mod test {
     use {
         super::*,
-        crate::project,
+        crate::project::Quota,
         wiremock::{
             http::Method,
-            matchers::{method, path},
+            matchers::{method, path, query_param},
             Mock,
             MockServer,
             ResponseTemplate,
@@ -156,11 +201,6 @@ mod test {
             verified_domains: vec![],
             bundle_ids: vec![],
             package_names: vec![],
-            quota: project::Quota {
-                max: 42,
-                current: 1,
-                is_valid: true,
-            },
         }
     }
 
@@ -179,6 +219,40 @@ mod test {
         let response = RegistryHttpClient::new(mock_server.uri(), "auth")
             .unwrap()
             .project_data(&project_id)
+            .await
+            .unwrap();
+        assert!(response.is_some());
+    }
+
+    fn mock_project_data_quota() -> ProjectDataWithQuota {
+        ProjectDataWithQuota {
+            project_data: mock_project_data(),
+            quota: Quota {
+                max: 42,
+                current: 1,
+                is_valid: true,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn project_exists_quota() {
+        let project_id = "a".repeat(32);
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method(Method::Get))
+            .and(path(format!("/internal/project/key/{project_id}")))
+            .and(query_param("quota", "true"))
+            .respond_with(
+                ResponseTemplate::new(StatusCode::OK).set_body_json(mock_project_data_quota()),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth")
+            .unwrap()
+            .project_data_with_quota(&project_id)
             .await
             .unwrap();
         assert!(response.is_some());
@@ -266,5 +340,29 @@ mod test {
             result,
             RegistryResult::Err(RegistryError::Config(INVALID_TOKEN_ERROR))
         ));
+    }
+
+    #[test]
+    fn test_build_url() {
+        let base_url = Url::parse("http://example.com").unwrap();
+        let project_id = "a".repeat(32);
+
+        let url = build_url(&base_url, &project_id, false).unwrap();
+        assert_eq!(
+            url.as_str(),
+            "http://example.com/internal/project/key/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+    }
+
+    #[test]
+    fn test_build_url_quota() {
+        let base_url = Url::parse("http://example.com").unwrap();
+        let project_id = "a".repeat(32);
+
+        let url = build_url(&base_url, &project_id, true).unwrap();
+        assert_eq!(
+            url.as_str(),
+            "http://example.com/internal/project/key/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?quota=true"
+        );
     }
 }

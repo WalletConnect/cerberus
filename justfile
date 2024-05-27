@@ -85,7 +85,7 @@ commit-check:
     echo '    ^^^ To install `cargo install --locked cocogitto`, see https://github.com/cocogitto/cocogitto for details'
   fi
 
-amigood: lint test test-all
+devloop: lint test test-all
 
 # Build project documentation
 _build-docs $open="":

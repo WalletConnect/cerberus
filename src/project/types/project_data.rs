@@ -32,6 +32,13 @@ pub struct ProjectData {
     pub verified_domains: Vec<String>,
     pub bundle_ids: Vec<String>,
     pub package_names: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDataWithQuota {
+    #[serde(flatten)]
+    pub project_data: ProjectData,
     pub quota: Quota,
 }
 
@@ -153,11 +160,6 @@ mod test {
                 "https://prod.header.example.com".to_owned(),
             ],
             is_enabled: true,
-            quota: Quota {
-                max: 100000000,
-                current: 0,
-                is_valid: true,
-            },
             bundle_ids: vec![
                 "com.example.bundle".to_owned(),
                 "com.example.bundle.dev".to_owned(),
@@ -251,11 +253,6 @@ mod test {
             is_verify_enabled: false,
             allowed_origins: vec![],
             is_enabled: true,
-            quota: Quota {
-                max: 100000000,
-                current: 0,
-                is_valid: true,
-            },
             bundle_ids: vec![],
             package_names: vec![],
         };
