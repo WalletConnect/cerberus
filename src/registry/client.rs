@@ -139,7 +139,7 @@ impl RegistryClient for RegistryHttpClient {
 fn build_url(base_url: &Url, project_id: &str, quota: bool) -> Result<Url, url::ParseError> {
     let mut url = base_url.join(&format!("/internal/project/key/{project_id}"))?;
     if quota {
-        url.query_pairs_mut().append_pair("quota", "true");
+        url.query_pairs_mut().append_pair("quotas", "true");
     }
     Ok(url)
 }
@@ -243,7 +243,7 @@ mod test {
 
         Mock::given(method(Method::Get))
             .and(path(format!("/internal/project/key/{project_id}")))
-            .and(query_param("quota", "true"))
+            .and(query_param("quotas", "true"))
             .respond_with(
                 ResponseTemplate::new(StatusCode::OK).set_body_json(mock_project_data_quota()),
             )
@@ -362,7 +362,7 @@ mod test {
         let url = build_url(&base_url, &project_id, true).unwrap();
         assert_eq!(
             url.as_str(),
-            "http://example.com/internal/project/key/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?quota=true"
+            "http://example.com/internal/project/key/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?quotas=true"
         );
     }
 }
