@@ -164,7 +164,7 @@ async fn parse_http_response<T: DeserializeOwned>(
                 .await
                 .map_err(RegistryError::ResponseJsonParse)?,
         )),
-        StatusCode::FORBIDDEN => Err(RegistryError::Config(INVALID_TOKEN_ERROR)),
+        StatusCode::UNAUTHORIZED => Err(RegistryError::Config(INVALID_TOKEN_ERROR)),
         StatusCode::NOT_FOUND => Ok(None),
         _ => Err(RegistryError::Response(format!(
             "status={status} body={:?}",
