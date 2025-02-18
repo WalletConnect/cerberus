@@ -164,7 +164,7 @@ async fn parse_http_response<T: DeserializeOwned>(
                 .await
                 .map_err(RegistryError::ResponseJsonParse)?,
         )),
-        StatusCode::FORBIDDEN => Err(RegistryError::Config(INVALID_TOKEN_ERROR)),
+        StatusCode::UNAUTHORIZED => Err(RegistryError::Config(INVALID_TOKEN_ERROR)),
         StatusCode::NOT_FOUND => Ok(None),
         _ => Err(RegistryError::Response(format!(
             "status={status} body={:?}",
@@ -328,7 +328,7 @@ mod test {
 
         Mock::given(method(Method::Get))
             .and(path(format!("/internal/project/key/{project_id}")))
-            .respond_with(ResponseTemplate::new(StatusCode::FORBIDDEN))
+            .respond_with(ResponseTemplate::new(StatusCode::UNAUTHORIZED))
             .mount(&mock_server)
             .await;
 
