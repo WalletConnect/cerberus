@@ -328,7 +328,7 @@ mod test {
 
         Mock::given(method(Method::Get))
             .and(path(format!("/internal/project/key/{project_id}")))
-            .respond_with(ResponseTemplate::new(StatusCode::FORBIDDEN))
+            .respond_with(ResponseTemplate::new(StatusCode::UNAUTHORIZED))
             .mount(&mock_server)
             .await;
 
