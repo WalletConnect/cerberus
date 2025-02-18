@@ -25,7 +25,7 @@ pub struct Origin<'a> {
 
 const WILDCARD: &str = "*";
 
-impl<'a> Origin<'a> {
+impl Origin<'_> {
     pub fn matches(&self, other: &Origin) -> bool {
         self.matches_internal(other, MatchDirection::Forward)
     }
@@ -111,7 +111,7 @@ impl<'a> TryFrom<&'a str> for Origin<'a> {
     }
 }
 
-impl<'a> Display for Origin<'a> {
+impl Display for Origin<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(scheme) = &self.scheme {
             write!(f, "{scheme}://")?;
