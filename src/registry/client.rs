@@ -6,7 +6,9 @@ use {
     async_trait::async_trait,
     reqwest::{
         header::{self, HeaderValue},
-        IntoUrl, StatusCode, Url,
+        IntoUrl,
+        StatusCode,
+        Url,
     },
     serde::de::DeserializeOwned,
     std::{fmt::Debug, time::Duration},
@@ -185,7 +187,9 @@ mod test {
         wiremock::{
             http::Method,
             matchers::{method, path, query_param},
-            Mock, MockServer, ResponseTemplate,
+            Mock,
+            MockServer,
+            ResponseTemplate,
         },
     };
 
