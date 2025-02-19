@@ -6,9 +6,7 @@ use {
     async_trait::async_trait,
     reqwest::{
         header::{self, HeaderValue},
-        IntoUrl,
-        StatusCode,
-        Url,
+        IntoUrl, StatusCode, Url,
     },
     serde::de::DeserializeOwned,
     std::{fmt::Debug, time::Duration},
@@ -67,13 +65,18 @@ pub struct RegistryHttpClient {
 }
 
 impl RegistryHttpClient {
-    pub fn new(base_url: impl IntoUrl, auth_token: &str) -> RegistryResult<Self> {
-        Self::with_config(base_url, auth_token, Default::default())
+    pub fn new(
+        base_url: impl IntoUrl,
+        auth_token: &str,
+        origin: &'static str,
+    ) -> RegistryResult<Self> {
+        Self::with_config(base_url, auth_token, origin, Default::default())
     }
 
     pub fn with_config(
         base_url: impl IntoUrl,
         auth_token: &str,
+        origin: &'static str,
         config: HttpClientConfig,
     ) -> RegistryResult<Self> {
         let mut auth_value = HeaderValue::from_str(&format!("Bearer {}", auth_token))
@@ -84,6 +87,7 @@ impl RegistryHttpClient {
 
         let mut headers = header::HeaderMap::new();
         headers.insert(header::AUTHORIZATION, auth_value);
+        headers.insert(header::ORIGIN, HeaderValue::from_static(origin));
 
         let mut http_client = reqwest::Client::builder()
             .default_headers(headers)
@@ -181,11 +185,11 @@ mod test {
         wiremock::{
             http::Method,
             matchers::{method, path, query_param},
-            Mock,
-            MockServer,
-            ResponseTemplate,
+            Mock, MockServer, ResponseTemplate,
         },
     };
+
+    const TEST_ORIGIN: &str = "https://cerberus-tests.reown.com";
 
     fn mock_project_data() -> ProjectData {
         ProjectData {
@@ -216,7 +220,7 @@ mod test {
             .mount(&mock_server)
             .await;
 
-        let response = RegistryHttpClient::new(mock_server.uri(), "auth")
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
             .unwrap()
             .project_data(&project_id)
             .await
@@ -250,7 +254,7 @@ mod test {
             .mount(&mock_server)
             .await;
 
-        let response = RegistryHttpClient::new(mock_server.uri(), "auth")
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
             .unwrap()
             .project_data_with_quota(&project_id)
             .await
@@ -270,7 +274,7 @@ mod test {
             .mount(&mock_server)
             .await;
 
-        let response = RegistryHttpClient::new(mock_server.uri(), "auth")
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
             .unwrap()
             .project_data(&project_id)
             .await
@@ -284,7 +288,7 @@ mod test {
 
         let mock_server = MockServer::start().await;
 
-        let response = RegistryHttpClient::new(mock_server.uri(), "auth")
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
             .unwrap()
             .project_data(&project_id)
             .await
@@ -298,7 +302,7 @@ mod test {
 
         let mock_server = MockServer::start().await;
 
-        let response = RegistryHttpClient::new(mock_server.uri(), "auth")
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
             .unwrap()
             .project_data(&project_id)
             .await
@@ -312,7 +316,7 @@ mod test {
 
         let mock_server = MockServer::start().await;
 
-        let response = RegistryHttpClient::new(mock_server.uri(), "auth")
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
             .unwrap()
             .project_data(&project_id)
             .await
@@ -332,7 +336,7 @@ mod test {
             .mount(&mock_server)
             .await;
 
-        let result = RegistryHttpClient::new(mock_server.uri(), "auth")
+        let result = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
             .unwrap()
             .project_data(&project_id)
             .await;
