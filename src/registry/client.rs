@@ -67,18 +67,14 @@ pub struct RegistryHttpClient {
 }
 
 impl RegistryHttpClient {
-    pub fn new(
-        base_url: impl IntoUrl,
-        auth_token: &str,
-        origin: &'static str,
-    ) -> RegistryResult<Self> {
+    pub fn new(base_url: impl IntoUrl, auth_token: &str, origin: &str) -> RegistryResult<Self> {
         Self::with_config(base_url, auth_token, origin, Default::default())
     }
 
     pub fn with_config(
         base_url: impl IntoUrl,
         auth_token: &str,
-        origin: &'static str,
+        origin: &str,
         config: HttpClientConfig,
     ) -> RegistryResult<Self> {
         let mut auth_value = HeaderValue::from_str(&format!("Bearer {}", auth_token))
@@ -89,7 +85,10 @@ impl RegistryHttpClient {
 
         let mut headers = header::HeaderMap::new();
         headers.insert(header::AUTHORIZATION, auth_value);
-        headers.insert(header::ORIGIN, HeaderValue::from_static(origin));
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_str(origin).map_err(RegistryError::OriginParse)?,
+        );
 
         let mut http_client = reqwest::Client::builder()
             .default_headers(headers)
