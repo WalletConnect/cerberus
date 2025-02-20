@@ -1,4 +1,4 @@
-use thiserror::Error as ThisError;
+use {reqwest::header::InvalidHeaderValue, thiserror::Error as ThisError};
 
 #[derive(ThisError, Debug)]
 pub enum RegistryError {
@@ -7,6 +7,9 @@ pub enum RegistryError {
 
     #[error("invalid config: {0}")]
     Config(&'static str),
+
+    #[error("origin parse: {0}")]
+    OriginParse(InvalidHeaderValue),
 
     #[error("json parse error: {0}")]
     ResponseJsonParse(reqwest::Error),

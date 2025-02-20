@@ -67,13 +67,14 @@ pub struct RegistryHttpClient {
 }
 
 impl RegistryHttpClient {
-    pub fn new(base_url: impl IntoUrl, auth_token: &str) -> RegistryResult<Self> {
-        Self::with_config(base_url, auth_token, Default::default())
+    pub fn new(base_url: impl IntoUrl, auth_token: &str, origin: &str) -> RegistryResult<Self> {
+        Self::with_config(base_url, auth_token, origin, Default::default())
     }
 
     pub fn with_config(
         base_url: impl IntoUrl,
         auth_token: &str,
+        origin: &str,
         config: HttpClientConfig,
     ) -> RegistryResult<Self> {
         let mut auth_value = HeaderValue::from_str(&format!("Bearer {}", auth_token))
@@ -84,6 +85,10 @@ impl RegistryHttpClient {
 
         let mut headers = header::HeaderMap::new();
         headers.insert(header::AUTHORIZATION, auth_value);
+        headers.insert(
+            header::ORIGIN,
+            HeaderValue::from_str(origin).map_err(RegistryError::OriginParse)?,
+        );
 
         let mut http_client = reqwest::Client::builder()
             .default_headers(headers)
@@ -187,6 +192,8 @@ mod test {
         },
     };
 
+    const TEST_ORIGIN: &str = "https://cerberus-tests.reown.com";
+
     fn mock_project_data() -> ProjectData {
         ProjectData {
             uuid: "".to_owned(),
@@ -216,7 +223,7 @@ mod test {
             .mount(&mock_server)
             .await;
 
-        let response = RegistryHttpClient::new(mock_server.uri(), "auth")
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
             .unwrap()
             .project_data(&project_id)
             .await
@@ -250,7 +257,7 @@ mod test {
             .mount(&mock_server)
             .await;
 
-        let response = RegistryHttpClient::new(mock_server.uri(), "auth")
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
             .unwrap()
             .project_data_with_quota(&project_id)
             .await
@@ -270,7 +277,7 @@ mod test {
             .mount(&mock_server)
             .await;
 
-        let response = RegistryHttpClient::new(mock_server.uri(), "auth")
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
             .unwrap()
             .project_data(&project_id)
             .await
@@ -284,7 +291,7 @@ mod test {
 
         let mock_server = MockServer::start().await;
 
-        let response = RegistryHttpClient::new(mock_server.uri(), "auth")
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
             .unwrap()
             .project_data(&project_id)
             .await
@@ -298,7 +305,7 @@ mod test {
 
         let mock_server = MockServer::start().await;
 
-        let response = RegistryHttpClient::new(mock_server.uri(), "auth")
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
             .unwrap()
             .project_data(&project_id)
             .await
@@ -312,7 +319,7 @@ mod test {
 
         let mock_server = MockServer::start().await;
 
-        let response = RegistryHttpClient::new(mock_server.uri(), "auth")
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
             .unwrap()
             .project_data(&project_id)
             .await
@@ -332,7 +339,7 @@ mod test {
             .mount(&mock_server)
             .await;
 
-        let result = RegistryHttpClient::new(mock_server.uri(), "auth")
+        let result = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
             .unwrap()
             .project_data(&project_id)
             .await;
