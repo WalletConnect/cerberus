@@ -142,7 +142,11 @@ impl RegistryClient for RegistryHttpClient {
 }
 
 fn build_url(base_url: &Url, project_id: &str, quota: bool) -> Result<Url, url::ParseError> {
-    let mut url = base_url.join(&format!("/internal/project/key/{project_id}"))?;
+    let mut url = base_url.join("/internal/v1/project")?;
+    url.query_pairs_mut()
+        .append_pair("projectId", project_id)
+        .append_pair("st", "cerberus")
+        .append_pair("sv", "1.0.0");
     if quota {
         url.query_pairs_mut().append_pair("quotas", "true");
     }
@@ -218,7 +222,8 @@ mod test {
         let mock_server = MockServer::start().await;
 
         Mock::given(method(Method::Get))
-            .and(path(format!("/internal/project/key/{project_id}")))
+            .and(path("/internal/v1/project"))
+            .and(query_param("projectId", &project_id))
             .respond_with(ResponseTemplate::new(StatusCode::OK).set_body_json(mock_project_data()))
             .mount(&mock_server)
             .await;
@@ -249,7 +254,8 @@ mod test {
         let mock_server = MockServer::start().await;
 
         Mock::given(method(Method::Get))
-            .and(path(format!("/internal/project/key/{project_id}")))
+            .and(path("/internal/v1/project"))
+            .and(query_param("projectId", &project_id))
             .and(query_param("quotas", "true"))
             .respond_with(
                 ResponseTemplate::new(StatusCode::OK).set_body_json(mock_project_data_quota()),
@@ -272,7 +278,7 @@ mod test {
         let mock_server = MockServer::start().await;
 
         Mock::given(method(Method::Get))
-            .and(path(format!("/internal/project/key/{project_id}")))
+            .and(path("/internal/v1/project"))
             .respond_with(ResponseTemplate::new(404))
             .mount(&mock_server)
             .await;
@@ -334,7 +340,8 @@ mod test {
         let mock_server = MockServer::start().await;
 
         Mock::given(method(Method::Get))
-            .and(path(format!("/internal/project/key/{project_id}")))
+            .and(path("/internal/v1/project"))
+            .and(query_param("projectId", &project_id))
             .respond_with(ResponseTemplate::new(StatusCode::UNAUTHORIZED))
             .mount(&mock_server)
             .await;
@@ -357,7 +364,7 @@ mod test {
         let url = build_url(&base_url, &project_id, false).unwrap();
         assert_eq!(
             url.as_str(),
-            "http://example.com/internal/project/key/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            "http://example.com/internal/v1/project?projectId=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&st=cerberus&sv=1.0.0"
         );
     }
 
@@ -369,7 +376,7 @@ mod test {
         let url = build_url(&base_url, &project_id, true).unwrap();
         assert_eq!(
             url.as_str(),
-            "http://example.com/internal/project/key/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?quotas=true"
+            "http://example.com/internal/v1/project?projectId=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&st=cerberus&sv=1.0.0&quotas=true"
         );
     }
 }
