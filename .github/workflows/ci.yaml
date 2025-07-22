@@ -44,7 +44,7 @@ jobs:
           - name: "Check Formatting"
             cmd: fmt
             args: -- --check
-            toolchain: nightly
+            toolchain: stable
             profile: default
           - name: "Unit Tests"
             cmd: test

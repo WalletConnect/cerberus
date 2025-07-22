@@ -1,19 +1,21 @@
 use {
     crate::{
-        project::{ProjectData, ProjectDataWithQuota},
+        project::{PlanLimits, ProjectData, ProjectDataWithLimits, ProjectDataWithQuota},
         registry::error::RegistryError,
     },
     async_trait::async_trait,
     reqwest::{
         header::{self, HeaderValue},
-        IntoUrl,
-        StatusCode,
-        Url,
+        IntoUrl, StatusCode, Url,
     },
     serde::de::DeserializeOwned,
     std::{fmt::Debug, time::Duration},
 };
 
+use once_cell::sync::Lazy;
+
+static INTERNAL_API_BASE_URI: Lazy<Url> =
+    Lazy::new(|| Url::parse("https://api.reown.com").expect("Invalid internal API base URI"));
 const INVALID_TOKEN_ERROR: &str = "invalid auth token";
 
 pub type RegistryResult<T> = Result<T, RegistryError>;
@@ -25,6 +27,11 @@ pub trait RegistryClient: 'static + Send + Sync + Debug {
         &self,
         id: &str,
     ) -> RegistryResult<Option<ProjectDataWithQuota>>;
+    async fn project_limits(&self, id: &str) -> RegistryResult<Option<PlanLimits>>;
+    async fn project_data_with_limits(
+        &self,
+        id: &str,
+    ) -> RegistryResult<Option<ProjectDataWithLimits>>;
 }
 
 /// HTTP client configuration.
@@ -62,22 +69,27 @@ impl Default for HttpClientConfig {
 
 #[derive(Debug, Clone)]
 pub struct RegistryHttpClient {
-    base_url: Url,
+    base_explorer_url: Url,
+    base_internal_api_url: Url,
     http_client: reqwest::Client,
 }
 
 impl RegistryHttpClient {
-    pub fn new(base_url: impl IntoUrl, auth_token: &str, origin: &str) -> RegistryResult<Self> {
-        Self::with_config(base_url, auth_token, origin, Default::default())
+    pub fn new(
+        base_explorer_url: impl IntoUrl,
+        auth_token: &str,
+        origin: &str,
+    ) -> RegistryResult<Self> {
+        Self::with_config(base_explorer_url, auth_token, origin, Default::default())
     }
 
     pub fn with_config(
-        base_url: impl IntoUrl,
+        base_explorer_url: impl IntoUrl,
         auth_token: &str,
         origin: &str,
         config: HttpClientConfig,
     ) -> RegistryResult<Self> {
-        let mut auth_value = HeaderValue::from_str(&format!("Bearer {}", auth_token))
+        let mut auth_value = HeaderValue::from_str(&format!("Bearer {auth_token}"))
             .map_err(|_| RegistryError::Config(INVALID_TOKEN_ERROR))?;
 
         // Make sure we're not leaking auth token in debug output.
@@ -90,6 +102,8 @@ impl RegistryHttpClient {
             HeaderValue::from_str(origin).map_err(RegistryError::OriginParse)?,
         );
 
+        // We can use the same client for both explorer and internal API
+        // because the internal API is protected by the same auth token.
         let mut http_client = reqwest::Client::builder()
             .default_headers(headers)
             .pool_idle_timeout(config.pool_idle_timeout)
@@ -100,7 +114,10 @@ impl RegistryHttpClient {
         }
 
         Ok(Self {
-            base_url: base_url.into_url().map_err(RegistryError::BaseUrlIntoUrl)?,
+            base_explorer_url: base_explorer_url
+                .into_url()
+                .map_err(RegistryError::BaseUrlIntoUrl)?,
+            base_internal_api_url: INTERNAL_API_BASE_URI.clone(),
             http_client: http_client.build().map_err(RegistryError::BuildClient)?,
         })
     }
@@ -114,7 +131,8 @@ impl RegistryHttpClient {
             return Ok(None);
         }
 
-        let url = build_url(&self.base_url, project_id, quota).map_err(RegistryError::UrlBuild)?;
+        let url = build_explorer_url(&self.base_explorer_url, project_id, quota)
+            .map_err(RegistryError::UrlBuild)?;
 
         let resp = self
             .http_client
@@ -124,6 +142,46 @@ impl RegistryHttpClient {
             .map_err(RegistryError::Transport)?;
 
         parse_http_response(resp).await
+    }
+
+    async fn project_limits_impl<T: DeserializeOwned>(
+        &self,
+        project_id: &str,
+    ) -> RegistryResult<Option<T>> {
+        if !is_valid_project_id(project_id) {
+            return Ok(None);
+        }
+
+        let url = build_internal_api_url(&self.base_internal_api_url, project_id)
+            .map_err(RegistryError::UrlBuild)?;
+
+        let resp = self
+            .http_client
+            .get(url)
+            .send()
+            .await
+            .map_err(RegistryError::Transport)?;
+
+        parse_http_response(resp).await
+    }
+
+    async fn project_data_with_limits_impl(
+        &self,
+        project_id: &str,
+    ) -> RegistryResult<Option<ProjectDataWithLimits>> {
+        if !is_valid_project_id(project_id) {
+            return Ok(None);
+        }
+        let data: ProjectData = match self.project_data_impl(project_id, false).await? {
+            Some(project_data) => project_data,
+            None => return Ok(None),
+        };
+        let limits: PlanLimits = match self.project_limits_impl(project_id).await? {
+            Some(limits) => limits,
+            None => return Ok(None),
+        };
+
+        Ok(Some(ProjectDataWithLimits { data, limits }))
     }
 }
 
@@ -139,13 +197,34 @@ impl RegistryClient for RegistryHttpClient {
     ) -> RegistryResult<Option<ProjectDataWithQuota>> {
         self.project_data_impl(project_id, true).await
     }
+
+    async fn project_limits(&self, project_id: &str) -> RegistryResult<Option<PlanLimits>> {
+        self.project_limits_impl(project_id).await
+    }
+
+    async fn project_data_with_limits(
+        &self,
+        project_id: &str,
+    ) -> RegistryResult<Option<ProjectDataWithLimits>> {
+        self.project_data_with_limits_impl(project_id).await
+    }
 }
 
-fn build_url(base_url: &Url, project_id: &str, quota: bool) -> Result<Url, url::ParseError> {
+fn build_explorer_url(
+    base_url: &Url,
+    project_id: &str,
+    quota: bool,
+) -> Result<Url, url::ParseError> {
     let mut url = base_url.join(&format!("/internal/project/key/{project_id}"))?;
     if quota {
         url.query_pairs_mut().append_pair("quotas", "true");
     }
+    Ok(url)
+}
+
+fn build_internal_api_url(base_url: &Url, project_id: &str) -> Result<Url, url::ParseError> {
+    let mut url = base_url.join("/internal/v1/project-limits")?;
+    url.query_pairs_mut().append_pair("projectId", project_id);
     Ok(url)
 }
 
@@ -186,9 +265,7 @@ mod test {
         wiremock::{
             http::Method,
             matchers::{method, path, query_param},
-            Mock,
-            MockServer,
-            ResponseTemplate,
+            Mock, MockServer, ResponseTemplate,
         },
     };
 
@@ -350,11 +427,11 @@ mod test {
     }
 
     #[test]
-    fn test_build_url() {
+    fn test_build_explorer_url() {
         let base_url = Url::parse("http://example.com").unwrap();
         let project_id = "a".repeat(32);
 
-        let url = build_url(&base_url, &project_id, false).unwrap();
+        let url = build_explorer_url(&base_url, &project_id, false).unwrap();
         assert_eq!(
             url.as_str(),
             "http://example.com/internal/project/key/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -366,7 +443,7 @@ mod test {
         let base_url = Url::parse("http://example.com").unwrap();
         let project_id = "a".repeat(32);
 
-        let url = build_url(&base_url, &project_id, true).unwrap();
+        let url = build_explorer_url(&base_url, &project_id, true).unwrap();
         assert_eq!(
             url.as_str(),
             "http://example.com/internal/project/key/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?quotas=true"
