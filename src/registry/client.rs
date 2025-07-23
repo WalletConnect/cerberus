@@ -8,9 +8,15 @@ use {
         header::{self, HeaderValue},
         IntoUrl, StatusCode, Url,
     },
-    serde::de::DeserializeOwned,
+    serde::{de::DeserializeOwned, Deserialize, Serialize},
     std::{fmt::Debug, time::Duration},
 };
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitsResponse {
+    pub plan_limits: PlanLimits,
+}
 
 use once_cell::sync::Lazy;
 
@@ -27,7 +33,7 @@ pub trait RegistryClient: 'static + Send + Sync + Debug {
         &self,
         id: &str,
     ) -> RegistryResult<Option<ProjectDataWithQuota>>;
-    async fn project_limits(&self, id: &str) -> RegistryResult<Option<PlanLimits>>;
+    async fn project_limits(&self, id: &str) -> RegistryResult<Option<LimitsResponse>>;
     async fn project_data_with_limits(
         &self,
         id: &str,
@@ -188,12 +194,12 @@ impl RegistryHttpClient {
         if !is_valid_project_id(project_id) {
             return Ok(None);
         }
-        let data: ProjectData = match self.project_data_impl(project_id, false).await? {
+        let data: ProjectData = match self.project_data(project_id).await? {
             Some(project_data) => project_data,
             None => return Ok(None),
         };
-        let limits: PlanLimits = match self.project_limits_impl(project_id).await? {
-            Some(limits) => limits,
+        let limits: PlanLimits = match self.project_limits(project_id).await? {
+            Some(response) => response.plan_limits,
             None => return Ok(None),
         };
 
@@ -214,7 +220,7 @@ impl RegistryClient for RegistryHttpClient {
         self.project_data_impl(project_id, true).await
     }
 
-    async fn project_limits(&self, project_id: &str) -> RegistryResult<Option<PlanLimits>> {
+    async fn project_limits(&self, project_id: &str) -> RegistryResult<Option<LimitsResponse>> {
         self.project_limits_impl(project_id).await
     }
 
