@@ -72,6 +72,8 @@ pub struct RegistryHttpClient {
     base_explorer_url: Url,
     base_internal_api_url: Url,
     http_client: reqwest::Client,
+    st: String,
+    sv: String,
 }
 
 impl RegistryHttpClient {
@@ -79,14 +81,25 @@ impl RegistryHttpClient {
         base_explorer_url: impl IntoUrl,
         auth_token: &str,
         origin: &str,
+        st: &str,
+        sv: &str,
     ) -> RegistryResult<Self> {
-        Self::with_config(base_explorer_url, auth_token, origin, Default::default())
+        Self::with_config(
+            base_explorer_url,
+            auth_token,
+            origin,
+            st,
+            sv,
+            Default::default(),
+        )
     }
 
     pub fn with_config(
         base_explorer_url: impl IntoUrl,
         auth_token: &str,
         origin: &str,
+        st: &str,
+        sv: &str,
         config: HttpClientConfig,
     ) -> RegistryResult<Self> {
         let mut auth_value = HeaderValue::from_str(&format!("Bearer {auth_token}"))
@@ -119,6 +132,8 @@ impl RegistryHttpClient {
                 .map_err(RegistryError::BaseUrlIntoUrl)?,
             base_internal_api_url: INTERNAL_API_BASE_URI.clone(),
             http_client: http_client.build().map_err(RegistryError::BuildClient)?,
+            st: st.to_string(),
+            sv: sv.to_string(),
         })
     }
 
@@ -152,8 +167,9 @@ impl RegistryHttpClient {
             return Ok(None);
         }
 
-        let url = build_internal_api_url(&self.base_internal_api_url, project_id)
-            .map_err(RegistryError::UrlBuild)?;
+        let url =
+            build_internal_api_url(&self.base_internal_api_url, project_id, &self.st, &self.sv)
+                .map_err(RegistryError::UrlBuild)?;
 
         let resp = self
             .http_client
@@ -222,9 +238,16 @@ fn build_explorer_url(
     Ok(url)
 }
 
-fn build_internal_api_url(base_url: &Url, project_id: &str) -> Result<Url, url::ParseError> {
+fn build_internal_api_url(
+    base_url: &Url,
+    project_id: &str,
+    st: &str,
+    sv: &str,
+) -> Result<Url, url::ParseError> {
     let mut url = base_url.join("/internal/v1/project-limits")?;
     url.query_pairs_mut().append_pair("projectId", project_id);
+    url.query_pairs_mut().append_pair("st", st);
+    url.query_pairs_mut().append_pair("sv", sv);
     Ok(url)
 }
 
@@ -300,7 +323,7 @@ mod test {
             .mount(&mock_server)
             .await;
 
-        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN, "st", "sv")
             .unwrap()
             .project_data(&project_id)
             .await
@@ -334,7 +357,7 @@ mod test {
             .mount(&mock_server)
             .await;
 
-        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN, "st", "sv")
             .unwrap()
             .project_data_with_quota(&project_id)
             .await
@@ -354,7 +377,7 @@ mod test {
             .mount(&mock_server)
             .await;
 
-        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN, "st", "sv")
             .unwrap()
             .project_data(&project_id)
             .await
@@ -368,7 +391,7 @@ mod test {
 
         let mock_server = MockServer::start().await;
 
-        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN, "st", "sv")
             .unwrap()
             .project_data(&project_id)
             .await
@@ -382,7 +405,7 @@ mod test {
 
         let mock_server = MockServer::start().await;
 
-        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN, "st", "sv")
             .unwrap()
             .project_data(&project_id)
             .await
@@ -396,7 +419,7 @@ mod test {
 
         let mock_server = MockServer::start().await;
 
-        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
+        let response = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN, "st", "sv")
             .unwrap()
             .project_data(&project_id)
             .await
@@ -416,7 +439,7 @@ mod test {
             .mount(&mock_server)
             .await;
 
-        let result = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN)
+        let result = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN, "st", "sv")
             .unwrap()
             .project_data(&project_id)
             .await;
