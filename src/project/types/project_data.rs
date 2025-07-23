@@ -41,13 +41,27 @@ pub struct ProjectDataWithQuota {
     pub project_data: ProjectData,
     pub quota: Quota,
 }
-
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Quota {
     pub max: u64,
     pub current: u64,
     pub is_valid: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDataWithLimits {
+    pub data: ProjectData,
+    pub limits: PlanLimits,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanLimits {
+    pub tier: String,
+    pub is_above_rpc_limit: bool,
+    pub is_above_mau_limit: bool,
 }
 
 impl ProjectData {
