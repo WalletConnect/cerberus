@@ -42,6 +42,7 @@ pub trait RegistryClient: 'static + Send + Sync + Debug {
         id: &str,
     ) -> RegistryResult<Option<ProjectDataWithLimits>>;
     async fn project_features(&self, id: &str) -> RegistryResult<Option<FeaturesResponse>>;
+
     /// Flexible method to fetch project data with optional additional information.
     ///
     /// This method accepts a `ProjectDataRequest` that specifies which additional
@@ -694,8 +695,8 @@ mod test {
             .await;
 
         let request = crate::project::ProjectDataRequest::new(&project_id)
-            .include_limits(true)
-            .include_features(true);
+            .include_limits()
+            .include_features();
 
         let response = RegistryHttpClient::with_config(
             mock_server.uri(),
@@ -761,7 +762,7 @@ mod test {
             .mount(&mock_server)
             .await;
 
-        let request = crate::project::ProjectDataRequest::new(&project_id).include_limits(true);
+        let request = crate::project::ProjectDataRequest::new(&project_id).include_limits();
 
         let response = RegistryHttpClient::with_config(
             mock_server.uri(),
@@ -815,7 +816,7 @@ mod test {
             .mount(&mock_server)
             .await;
 
-        let request = crate::project::ProjectDataRequest::new(&project_id).include_features(true);
+        let request = crate::project::ProjectDataRequest::new(&project_id).include_features();
 
         let response = RegistryHttpClient::with_config(
             mock_server.uri(),

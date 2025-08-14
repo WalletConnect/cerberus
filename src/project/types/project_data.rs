@@ -78,14 +78,6 @@ pub struct FeaturesResponse {
     pub features: Vec<Feature>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ProjectDataWithLimitsAndFeatures {
-    pub data: ProjectData,
-    pub limits: PlanLimits,
-    pub features: Vec<Feature>,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectDataRequest<'a> {
     pub id: &'a str,
@@ -102,13 +94,13 @@ impl<'a> ProjectDataRequest<'a> {
         }
     }
 
-    pub fn include_limits(mut self, include: bool) -> Self {
-        self.include_limits = include;
+    pub fn include_limits(mut self) -> Self {
+        self.include_limits = true;
         self
     }
 
-    pub fn include_features(mut self, include: bool) -> Self {
-        self.include_features = include;
+    pub fn include_features(mut self) -> Self {
+        self.include_features = true;
         self
     }
 }
