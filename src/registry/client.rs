@@ -1,6 +1,9 @@
 use {
     crate::{
-        project::{PlanLimits, ProjectData, ProjectDataWithLimits, ProjectDataWithQuota},
+        project::{
+            FeaturesResponse, PlanLimits, ProjectData, ProjectDataWithLimits,
+            ProjectDataWithLimitsAndFeatures, ProjectDataWithQuota,
+        },
         registry::error::RegistryError,
     },
     async_trait::async_trait,
@@ -38,6 +41,11 @@ pub trait RegistryClient: 'static + Send + Sync + Debug {
         &self,
         id: &str,
     ) -> RegistryResult<Option<ProjectDataWithLimits>>;
+    async fn project_features(&self, id: &str) -> RegistryResult<Option<FeaturesResponse>>;
+    async fn project_data_with_limits_and_features(
+        &self,
+        id: &str,
+    ) -> RegistryResult<Option<ProjectDataWithLimitsAndFeatures>>;
 }
 
 /// HTTP client configuration.
@@ -92,6 +100,7 @@ impl RegistryHttpClient {
     ) -> RegistryResult<Self> {
         Self::with_config(
             base_explorer_url,
+            None::<&str>,
             auth_token,
             origin,
             st,
@@ -102,6 +111,7 @@ impl RegistryHttpClient {
 
     pub fn with_config(
         base_explorer_url: impl IntoUrl,
+        base_internal_api_url: Option<impl IntoUrl>,
         auth_token: &str,
         origin: &str,
         st: &str,
@@ -132,11 +142,16 @@ impl RegistryHttpClient {
             http_client = http_client.connect_timeout(timeout).timeout(timeout);
         }
 
+        let internal_api_url = match base_internal_api_url {
+            Some(url) => url.into_url().map_err(RegistryError::BaseUrlIntoUrl)?,
+            None => INTERNAL_API_BASE_URI.clone(),
+        };
+
         Ok(Self {
             base_explorer_url: base_explorer_url
                 .into_url()
                 .map_err(RegistryError::BaseUrlIntoUrl)?,
-            base_internal_api_url: INTERNAL_API_BASE_URI.clone(),
+            base_internal_api_url: internal_api_url,
             http_client: http_client.build().map_err(RegistryError::BuildClient)?,
             st: st.to_string(),
             sv: sv.to_string(),
@@ -205,6 +220,48 @@ impl RegistryHttpClient {
 
         Ok(Some(ProjectDataWithLimits { data, limits }))
     }
+
+    async fn project_features_impl<T: DeserializeOwned>(
+        &self,
+        project_id: &str,
+    ) -> RegistryResult<Option<T>> {
+        if !is_valid_project_id(project_id) {
+            return Ok(None);
+        }
+
+        let url = build_features_url(&self.base_internal_api_url, project_id, &self.st, &self.sv)
+            .map_err(RegistryError::UrlBuild)?;
+
+        let resp = self
+            .http_client
+            .get(url)
+            .send()
+            .await
+            .map_err(RegistryError::Transport)?;
+
+        parse_http_response(resp).await
+    }
+
+    async fn project_data_with_limits_and_features_impl(
+        &self,
+        project_id: &str,
+    ) -> RegistryResult<Option<ProjectDataWithLimitsAndFeatures>> {
+        let data_with_limits = match self.project_data_with_limits_impl(project_id).await? {
+            Some(data_with_limits) => data_with_limits,
+            None => return Ok(None),
+        };
+
+        let features_response: FeaturesResponse = match self.project_features(project_id).await? {
+            Some(response) => response,
+            None => return Ok(None),
+        };
+
+        Ok(Some(ProjectDataWithLimitsAndFeatures {
+            data: data_with_limits.data,
+            limits: data_with_limits.limits,
+            features: features_response.features,
+        }))
+    }
 }
 
 #[async_trait]
@@ -230,6 +287,17 @@ impl RegistryClient for RegistryHttpClient {
     ) -> RegistryResult<Option<ProjectDataWithLimits>> {
         self.project_data_with_limits_impl(project_id).await
     }
+
+    async fn project_features(&self, project_id: &str) -> RegistryResult<Option<FeaturesResponse>> {
+        self.project_features_impl(project_id).await
+    }
+
+    async fn project_data_with_limits_and_features(
+        &self,
+        project_id: &str,
+    ) -> RegistryResult<Option<ProjectDataWithLimitsAndFeatures>> {
+        self.project_data_with_limits_and_features_impl(project_id).await
+    }
 }
 
 fn build_explorer_url(
@@ -251,6 +319,19 @@ fn build_internal_api_url(
     sv: &str,
 ) -> Result<Url, url::ParseError> {
     let mut url = base_url.join("/internal/v1/project-limits")?;
+    url.query_pairs_mut().append_pair("projectId", project_id);
+    url.query_pairs_mut().append_pair("st", st);
+    url.query_pairs_mut().append_pair("sv", sv);
+    Ok(url)
+}
+
+fn build_features_url(
+    base_url: &Url,
+    project_id: &str,
+    st: &str,
+    sv: &str,
+) -> Result<Url, url::ParseError> {
+    let mut url = base_url.join("/appkit/v1/config")?;
     url.query_pairs_mut().append_pair("projectId", project_id);
     url.query_pairs_mut().append_pair("st", st);
     url.query_pairs_mut().append_pair("sv", sv);
@@ -477,5 +558,140 @@ mod test {
             url.as_str(),
             "http://example.com/internal/project/key/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa?quotas=true"
         );
+    }
+
+    #[test]
+    fn test_build_features_url() {
+        let base_url = Url::parse("http://example.com").unwrap();
+        let project_id = "a".repeat(32);
+
+        let url = build_features_url(&base_url, &project_id, "blockchain-api", "1.0.0").unwrap();
+        assert_eq!(
+            url.as_str(),
+            "http://example.com/appkit/v1/config?projectId=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&st=blockchain-api&sv=1.0.0"
+        );
+    }
+
+    fn mock_features_response() -> FeaturesResponse {
+        FeaturesResponse {
+            features: vec![
+                crate::project::Feature {
+                    id: "multi_wallet".to_string(),
+                    is_enabled: false,
+                    config: Some(serde_json::json!([])),
+                },
+                crate::project::Feature {
+                    id: "social_login".to_string(),
+                    is_enabled: true,
+                    config: None,
+                },
+            ],
+        }
+    }
+
+    #[tokio::test]
+    async fn project_features_exist() {
+        let project_id = "a".repeat(32);
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method(Method::Get))
+            .and(path("/appkit/v1/config"))
+            .and(query_param("projectId", project_id.clone()))
+            .and(query_param("st", "st"))
+            .and(query_param("sv", "sv"))
+            .respond_with(
+                ResponseTemplate::new(StatusCode::OK).set_body_json(mock_features_response()),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let response = RegistryHttpClient::with_config(
+            mock_server.uri(),
+            Some(mock_server.uri()),
+            "auth",
+            TEST_ORIGIN,
+            "st",
+            "sv",
+            Default::default(),
+        )
+        .unwrap()
+        .project_features(&project_id)
+        .await
+        .unwrap();
+        assert!(response.is_some());
+        let features = response.unwrap();
+        assert_eq!(features.features.len(), 2);
+        assert_eq!(features.features[0].id, "multi_wallet");
+        assert!(!features.features[0].is_enabled);
+        assert_eq!(features.features[1].id, "social_login");
+        assert!(features.features[1].is_enabled);
+    }
+
+    #[tokio::test]
+    async fn project_data_with_limits_and_features_exists() {
+        let project_id = "a".repeat(32);
+        let mock_server = MockServer::start().await;
+
+        // Mock project data endpoint
+        Mock::given(method(Method::Get))
+            .and(path(format!("/internal/project/key/{project_id}")))
+            .respond_with(ResponseTemplate::new(StatusCode::OK).set_body_json(mock_project_data()))
+            .mount(&mock_server)
+            .await;
+
+        // Mock project limits endpoint
+        Mock::given(method(Method::Get))
+            .and(path("/internal/v1/project-limits"))
+            .and(query_param("projectId", project_id.clone()))
+            .and(query_param("st", "st"))
+            .and(query_param("sv", "sv"))
+            .respond_with(
+                ResponseTemplate::new(StatusCode::OK).set_body_json(LimitsResponse {
+                    plan_limits: crate::project::PlanLimits {
+                        tier: "free".to_string(),
+                        is_above_rpc_limit: false,
+                        is_above_mau_limit: false,
+                    },
+                }),
+            )
+            .mount(&mock_server)
+            .await;
+
+        // Mock features endpoint
+        Mock::given(method(Method::Get))
+            .and(path("/appkit/v1/config"))
+            .and(query_param("projectId", project_id.clone()))
+            .and(query_param("st", "st"))
+            .and(query_param("sv", "sv"))
+            .respond_with(
+                ResponseTemplate::new(StatusCode::OK).set_body_json(mock_features_response()),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let response = RegistryHttpClient::with_config(
+            mock_server.uri(),
+            Some(mock_server.uri()),
+            "auth",
+            TEST_ORIGIN,
+            "st",
+            "sv",
+            Default::default(),
+        )
+        .unwrap()
+        .project_data_with_limits_and_features(&project_id)
+        .await
+        .unwrap();
+
+        assert!(response.is_some());
+        let data = response.unwrap();
+        assert_eq!(data.limits.tier, "free");
+        assert!(!data.limits.is_above_rpc_limit);
+        assert!(!data.limits.is_above_mau_limit);
+        assert_eq!(data.features.len(), 2);
+        assert_eq!(data.features[0].id, "multi_wallet");
+        assert_eq!(data.features[1].id, "social_login");
+        assert!(!data.features[0].is_enabled);
+        assert!(data.features[1].is_enabled);
     }
 }

@@ -64,6 +64,28 @@ pub struct PlanLimits {
     pub is_above_mau_limit: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Feature {
+    pub id: String,
+    pub is_enabled: bool,
+    pub config: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FeaturesResponse {
+    pub features: Vec<Feature>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDataWithLimitsAndFeatures {
+    pub data: ProjectData,
+    pub limits: PlanLimits,
+    pub features: Vec<Feature>,
+}
+
 impl ProjectData {
     pub fn validate_access(
         &self,
