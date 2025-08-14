@@ -86,6 +86,44 @@ pub struct ProjectDataWithLimitsAndFeatures {
     pub features: Vec<Feature>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectDataRequest<'a> {
+    pub id: &'a str,
+    pub include_limits: bool,
+    pub include_features: bool,
+}
+
+impl<'a> ProjectDataRequest<'a> {
+    pub fn new(id: &'a str) -> Self {
+        Self {
+            id,
+            include_limits: false,
+            include_features: false,
+        }
+    }
+
+    pub fn include_limits(mut self, include: bool) -> Self {
+        self.include_limits = include;
+        self
+    }
+
+    pub fn include_features(mut self, include: bool) -> Self {
+        self.include_features = include;
+        self
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDataResponse {
+    #[serde(flatten)]
+    pub data: ProjectData,
+    #[serde(default)]
+    pub limits: Option<PlanLimits>,
+    #[serde(default)]
+    pub features: Option<Vec<Feature>>,
+}
+
 impl ProjectData {
     pub fn validate_access(
         &self,

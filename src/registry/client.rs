@@ -1,8 +1,8 @@
 use {
     crate::{
         project::{
-            FeaturesResponse, PlanLimits, ProjectData, ProjectDataWithLimits,
-            ProjectDataWithLimitsAndFeatures, ProjectDataWithQuota,
+            FeaturesResponse, PlanLimits, ProjectData, ProjectDataRequest, ProjectDataResponse,
+            ProjectDataWithLimits, ProjectDataWithQuota,
         },
         registry::error::RegistryError,
     },
@@ -42,10 +42,15 @@ pub trait RegistryClient: 'static + Send + Sync + Debug {
         id: &str,
     ) -> RegistryResult<Option<ProjectDataWithLimits>>;
     async fn project_features(&self, id: &str) -> RegistryResult<Option<FeaturesResponse>>;
-    async fn project_data_with_limits_and_features(
+    /// Flexible method to fetch project data with optional additional information.
+    ///
+    /// This method accepts a `ProjectDataRequest` that specifies which additional
+    /// data to include (limits, features, or both) and returns a unified response
+    /// structure with optional fields.
+    async fn project_data_with(
         &self,
-        id: &str,
-    ) -> RegistryResult<Option<ProjectDataWithLimitsAndFeatures>>;
+        request: ProjectDataRequest<'_>,
+    ) -> RegistryResult<Option<ProjectDataResponse>>;
 }
 
 /// HTTP client configuration.
@@ -242,24 +247,43 @@ impl RegistryHttpClient {
         parse_http_response(resp).await
     }
 
-    async fn project_data_with_limits_and_features_impl(
+    async fn project_data_with_impl(
         &self,
-        project_id: &str,
-    ) -> RegistryResult<Option<ProjectDataWithLimitsAndFeatures>> {
-        let data_with_limits = match self.project_data_with_limits_impl(project_id).await? {
-            Some(data_with_limits) => data_with_limits,
-            None => return Ok(None),
+        request: ProjectDataRequest<'_>,
+    ) -> RegistryResult<Option<ProjectDataResponse>> {
+        if !is_valid_project_id(request.id) {
+            return Ok(None);
+        }
+        // Always fetch the base project data
+        let data = self
+            .project_data(request.id)
+            .await?
+            .ok_or_else(|| RegistryError::Response("Project not found".to_string()))?;
+
+        let limits = match request.include_limits {
+            true => Some(
+                self.project_limits(request.id)
+                    .await?
+                    .ok_or_else(|| RegistryError::Response("Limits not found".to_string()))?
+                    .plan_limits,
+            ),
+            false => None,
         };
 
-        let features_response: FeaturesResponse = match self.project_features(project_id).await? {
-            Some(response) => response,
-            None => return Ok(None),
+        let features = match request.include_features {
+            true => Some(
+                self.project_features(request.id)
+                    .await?
+                    .ok_or_else(|| RegistryError::Response("Features not found".to_string()))?
+                    .features,
+            ),
+            false => None,
         };
 
-        Ok(Some(ProjectDataWithLimitsAndFeatures {
-            data: data_with_limits.data,
-            limits: data_with_limits.limits,
-            features: features_response.features,
+        Ok(Some(ProjectDataResponse {
+            data,
+            limits,
+            features,
         }))
     }
 }
@@ -292,12 +316,11 @@ impl RegistryClient for RegistryHttpClient {
         self.project_features_impl(project_id).await
     }
 
-    async fn project_data_with_limits_and_features(
+    async fn project_data_with(
         &self,
-        project_id: &str,
-    ) -> RegistryResult<Option<ProjectDataWithLimitsAndFeatures>> {
-        self.project_data_with_limits_and_features_impl(project_id)
-            .await
+        request: ProjectDataRequest<'_>,
+    ) -> RegistryResult<Option<ProjectDataResponse>> {
+        self.project_data_with_impl(request).await
     }
 }
 
@@ -629,7 +652,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn project_data_with_limits_and_features_exists() {
+    async fn project_data_with_query_includes_limits_and_features() {
         let project_id = "a".repeat(32);
         let mock_server = MockServer::start().await;
 
@@ -670,6 +693,10 @@ mod test {
             .mount(&mock_server)
             .await;
 
+        let request = crate::project::ProjectDataRequest::new(&project_id)
+            .include_limits(true)
+            .include_features(true);
+
         let response = RegistryHttpClient::with_config(
             mock_server.uri(),
             Some(mock_server.uri()),
@@ -680,19 +707,182 @@ mod test {
             Default::default(),
         )
         .unwrap()
-        .project_data_with_limits_and_features(&project_id)
+        .project_data_with(request)
         .await
         .unwrap();
 
         assert!(response.is_some());
         let data = response.unwrap();
-        assert_eq!(data.limits.tier, "free");
-        assert!(!data.limits.is_above_rpc_limit);
-        assert!(!data.limits.is_above_mau_limit);
-        assert_eq!(data.features.len(), 2);
-        assert_eq!(data.features[0].id, "multi_wallet");
-        assert_eq!(data.features[1].id, "social_login");
-        assert!(!data.features[0].is_enabled);
-        assert!(data.features[1].is_enabled);
+
+        // Check that limits are included
+        assert!(data.limits.is_some());
+        let limits = data.limits.unwrap();
+        assert_eq!(limits.tier, "free");
+        assert!(!limits.is_above_rpc_limit);
+        assert!(!limits.is_above_mau_limit);
+
+        // Check that features are included
+        assert!(data.features.is_some());
+        let features = data.features.unwrap();
+        assert_eq!(features.len(), 2);
+        assert_eq!(features[0].id, "multi_wallet");
+        assert_eq!(features[1].id, "social_login");
+        assert!(!features[0].is_enabled);
+        assert!(features[1].is_enabled);
+    }
+
+    #[tokio::test]
+    async fn project_data_with_query_limits_only() {
+        let project_id = "a".repeat(32);
+        let mock_server = MockServer::start().await;
+
+        // Mock project data endpoint
+        Mock::given(method(Method::Get))
+            .and(path(format!("/internal/project/key/{project_id}")))
+            .respond_with(ResponseTemplate::new(StatusCode::OK).set_body_json(mock_project_data()))
+            .mount(&mock_server)
+            .await;
+
+        // Mock project limits endpoint
+        Mock::given(method(Method::Get))
+            .and(path("/internal/v1/project-limits"))
+            .and(query_param("projectId", project_id.clone()))
+            .and(query_param("st", "st"))
+            .and(query_param("sv", "sv"))
+            .respond_with(
+                ResponseTemplate::new(StatusCode::OK).set_body_json(LimitsResponse {
+                    plan_limits: crate::project::PlanLimits {
+                        tier: "premium".to_string(),
+                        is_above_rpc_limit: true,
+                        is_above_mau_limit: false,
+                    },
+                }),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let request = crate::project::ProjectDataRequest::new(&project_id).include_limits(true);
+
+        let response = RegistryHttpClient::with_config(
+            mock_server.uri(),
+            Some(mock_server.uri()),
+            "auth",
+            TEST_ORIGIN,
+            "st",
+            "sv",
+            Default::default(),
+        )
+        .unwrap()
+        .project_data_with(request)
+        .await
+        .unwrap();
+
+        assert!(response.is_some());
+        let data = response.unwrap();
+
+        // Check that limits are included
+        assert!(data.limits.is_some());
+        let limits = data.limits.unwrap();
+        assert_eq!(limits.tier, "premium");
+        assert!(limits.is_above_rpc_limit);
+        assert!(!limits.is_above_mau_limit);
+
+        // Check that features are NOT included
+        assert!(data.features.is_none());
+    }
+
+    #[tokio::test]
+    async fn project_data_with_query_features_only() {
+        let project_id = "a".repeat(32);
+        let mock_server = MockServer::start().await;
+
+        // Mock project data endpoint
+        Mock::given(method(Method::Get))
+            .and(path(format!("/internal/project/key/{project_id}")))
+            .respond_with(ResponseTemplate::new(StatusCode::OK).set_body_json(mock_project_data()))
+            .mount(&mock_server)
+            .await;
+
+        // Mock features endpoint
+        Mock::given(method(Method::Get))
+            .and(path("/appkit/v1/config"))
+            .and(query_param("projectId", project_id.clone()))
+            .and(query_param("st", "st"))
+            .and(query_param("sv", "sv"))
+            .respond_with(
+                ResponseTemplate::new(StatusCode::OK).set_body_json(mock_features_response()),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let request = crate::project::ProjectDataRequest::new(&project_id).include_features(true);
+
+        let response = RegistryHttpClient::with_config(
+            mock_server.uri(),
+            Some(mock_server.uri()),
+            "auth",
+            TEST_ORIGIN,
+            "st",
+            "sv",
+            Default::default(),
+        )
+        .unwrap()
+        .project_data_with(request)
+        .await
+        .unwrap();
+
+        assert!(response.is_some());
+        let data = response.unwrap();
+
+        // Check that limits are NOT included
+        assert!(data.limits.is_none());
+
+        // Check that features are included
+        assert!(data.features.is_some());
+        let features = data.features.unwrap();
+        assert_eq!(features.len(), 2);
+        assert_eq!(features[0].id, "multi_wallet");
+        assert_eq!(features[1].id, "social_login");
+    }
+
+    #[tokio::test]
+    async fn project_data_with_query_basic_only() {
+        let project_id = "a".repeat(32);
+        let mock_server = MockServer::start().await;
+
+        // Mock project data endpoint
+        Mock::given(method(Method::Get))
+            .and(path(format!("/internal/project/key/{project_id}")))
+            .respond_with(ResponseTemplate::new(StatusCode::OK).set_body_json(mock_project_data()))
+            .mount(&mock_server)
+            .await;
+
+        let request = crate::project::ProjectDataRequest::new(&project_id);
+
+        let response = RegistryHttpClient::with_config(
+            mock_server.uri(),
+            Some(mock_server.uri()),
+            "auth",
+            TEST_ORIGIN,
+            "st",
+            "sv",
+            Default::default(),
+        )
+        .unwrap()
+        .project_data_with(request)
+        .await
+        .unwrap();
+
+        assert!(response.is_some());
+        let data = response.unwrap();
+
+        assert_eq!(data.data.name, "");
+        assert_eq!(data.data.uuid, "");
+        assert_eq!(data.data.creator, "");
+        assert!(!data.data.is_enabled);
+
+        // Check that optional fields are NOT included
+        assert!(data.limits.is_none());
+        assert!(data.features.is_none());
     }
 }
