@@ -296,7 +296,8 @@ impl RegistryClient for RegistryHttpClient {
         &self,
         project_id: &str,
     ) -> RegistryResult<Option<ProjectDataWithLimitsAndFeatures>> {
-        self.project_data_with_limits_and_features_impl(project_id).await
+        self.project_data_with_limits_and_features_impl(project_id)
+            .await
     }
 }
 
