@@ -13,6 +13,7 @@ use {
     },
     serde::{de::DeserializeOwned, Deserialize, Serialize},
     std::{fmt::Debug, time::Duration},
+    tracing::error,
 };
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Clone)]
@@ -72,17 +73,24 @@ pub struct HttpClientConfig {
     /// The timeout is applied for both the connect phase of a `Client`, and for
     /// fully receiving response body.
     ///
-    /// Default is no timeout.
+    /// Default is 5 seconds.
     pub timeout: Option<Duration>,
+
+    /// Number of times to retry a failed request.
+    ///
+    /// Default is 2 retries.
+    pub max_retries: usize,
 }
 
 impl Default for HttpClientConfig {
     fn default() -> Self {
-        // These defaults are taken from `reqwest` default config.
         Self {
+            // These defaults are taken from `reqwest` default config.
             pool_idle_timeout: Some(Duration::from_secs(90)),
             pool_max_idle: usize::MAX,
-            timeout: None,
+            timeout: Some(Duration::from_secs(5)),
+            // 2 retries if the first request fails.
+            max_retries: 2,
         }
     }
 }
@@ -94,6 +102,7 @@ pub struct RegistryHttpClient {
     http_client: reqwest::Client,
     st: String,
     sv: String,
+    max_retries: usize,
 }
 
 impl RegistryHttpClient {
@@ -161,7 +170,28 @@ impl RegistryHttpClient {
             http_client: http_client.build().map_err(RegistryError::BuildClient)?,
             st: st.to_string(),
             sv: sv.to_string(),
+            max_retries: config.max_retries,
         })
+    }
+
+    async fn get_with_retry(&self, url: Url) -> RegistryResult<reqwest::Response> {
+        let mut last_err: Option<reqwest::Error> = None;
+        for _attempt in 0..=self.max_retries {
+            match self.http_client.get(url.clone()).send().await {
+                Ok(resp) => return Ok(resp),
+                Err(err) => {
+                    error!("Error fetching URL {url}: {err}. Retrying.");
+                    last_err = Some(err);
+                }
+            }
+        }
+        error!(
+            "Failed to fetch URL {url} after {0} attempts: {last_err:?}",
+            self.max_retries
+        );
+        Err(RegistryError::Transport(
+            last_err.expect("max_retries >= 0 guarantees at least one attempt"),
+        ))
     }
 
     async fn project_data_impl<T: DeserializeOwned>(
@@ -176,12 +206,7 @@ impl RegistryHttpClient {
         let url = build_explorer_url(&self.base_explorer_url, project_id, quota)
             .map_err(RegistryError::UrlBuild)?;
 
-        let resp = self
-            .http_client
-            .get(url)
-            .send()
-            .await
-            .map_err(RegistryError::Transport)?;
+        let resp = self.get_with_retry(url).await?;
 
         parse_http_response(resp).await
     }
@@ -198,12 +223,7 @@ impl RegistryHttpClient {
             build_internal_api_url(&self.base_internal_api_url, project_id, &self.st, &self.sv)
                 .map_err(RegistryError::UrlBuild)?;
 
-        let resp = self
-            .http_client
-            .get(url)
-            .send()
-            .await
-            .map_err(RegistryError::Transport)?;
+        let resp = self.get_with_retry(url).await?;
 
         parse_http_response(resp).await
     }
@@ -238,12 +258,7 @@ impl RegistryHttpClient {
         let url = build_features_url(&self.base_internal_api_url, project_id, &self.st, &self.sv)
             .map_err(RegistryError::UrlBuild)?;
 
-        let resp = self
-            .http_client
-            .get(url)
-            .send()
-            .await
-            .map_err(RegistryError::Transport)?;
+        let resp = self.get_with_retry(url).await?;
 
         parse_http_response(resp).await
     }
