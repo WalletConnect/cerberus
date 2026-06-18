@@ -300,23 +300,24 @@ impl RegistryHttpClient {
             None => return Ok(None),
         };
 
+        // A missing sub-resource (registry returns 404) must surface as
+        // `Ok(None)`, never `Err`, for the same reason as the base project
+        // data above and to match `project_data_with_limits_impl`: an `Err`
+        // makes callers treat a definitively-absent limit/feature record as a
+        // transient registry outage and fail open.
         let limits = match request.include_limits {
-            true => Some(
-                self.project_limits(request.id)
-                    .await?
-                    .ok_or_else(|| RegistryError::Response("Limits not found".to_string()))?
-                    .plan_limits,
-            ),
+            true => match self.project_limits(request.id).await? {
+                Some(response) => Some(response.plan_limits),
+                None => return Ok(None),
+            },
             false => None,
         };
 
         let features = match request.include_features {
-            true => Some(
-                self.project_features(request.id)
-                    .await?
-                    .ok_or_else(|| RegistryError::Response("Features not found".to_string()))?
-                    .features,
-            ),
+            true => match self.project_features(request.id).await? {
+                Some(response) => Some(response.features),
+                None => return Ok(None),
+            },
             false => None,
         };
 
@@ -424,6 +425,21 @@ async fn parse_http_response<T: DeserializeOwned>(
         )),
         StatusCode::UNAUTHORIZED => Err(RegistryError::Config(INVALID_TOKEN_ERROR)),
         StatusCode::NOT_FOUND => Ok(None),
+        // Distinguish terminal denials from transient outages so callers can
+        // fail closed on the former instead of lumping everything into a
+        // generic error that gets classified as a retryable outage.
+        StatusCode::FORBIDDEN => Err(RegistryError::Forbidden(format!(
+            "status={status} body={:?}",
+            resp.text().await
+        ))),
+        StatusCode::TOO_MANY_REQUESTS => Err(RegistryError::RateLimited(format!(
+            "status={status} body={:?}",
+            resp.text().await
+        ))),
+        code if code.is_server_error() => Err(RegistryError::ServerError(format!(
+            "status={status} body={:?}",
+            resp.text().await
+        ))),
         _ => Err(RegistryError::Response(format!(
             "status={status} body={:?}",
             resp.text().await
@@ -569,6 +585,127 @@ mod test {
         // callers treat an unknown project as a transient registry outage and
         // fail open instead of rejecting the request.
         assert!(response.is_none());
+    }
+
+    #[tokio::test]
+    async fn project_data_with_returns_none_when_limits_not_found() {
+        let project_id = "a".repeat(32);
+
+        let mock_server = MockServer::start().await;
+
+        // The project itself exists...
+        Mock::given(method(Method::Get))
+            .and(path(format!("/internal/project/key/{project_id}")))
+            .respond_with(ResponseTemplate::new(StatusCode::OK).set_body_json(mock_project_data()))
+            .mount(&mock_server)
+            .await;
+
+        // ...but its limits record is missing (404).
+        Mock::given(method(Method::Get))
+            .and(path("/internal/v1/project-limits"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let request = crate::project::ProjectDataRequest::new(&project_id).include_limits();
+
+        let response = RegistryHttpClient::with_config(
+            mock_server.uri(),
+            Some(mock_server.uri()),
+            "auth",
+            TEST_ORIGIN,
+            "st",
+            "sv",
+            Default::default(),
+        )
+        .unwrap()
+        .project_data_with(request)
+        .await
+        .unwrap();
+
+        // A missing limits record must be `Ok(None)`, not an `Err`: an `Err`
+        // makes callers treat it as a transient outage and fail open on plan /
+        // rate-limit enforcement.
+        assert!(response.is_none());
+    }
+
+    #[tokio::test]
+    async fn project_data_with_returns_none_when_features_not_found() {
+        let project_id = "a".repeat(32);
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method(Method::Get))
+            .and(path(format!("/internal/project/key/{project_id}")))
+            .respond_with(ResponseTemplate::new(StatusCode::OK).set_body_json(mock_project_data()))
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method(Method::Get))
+            .and(path("/appkit/v1/config"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let request = crate::project::ProjectDataRequest::new(&project_id).include_features();
+
+        let response = RegistryHttpClient::with_config(
+            mock_server.uri(),
+            Some(mock_server.uri()),
+            "auth",
+            TEST_ORIGIN,
+            "st",
+            "sv",
+            Default::default(),
+        )
+        .unwrap()
+        .project_data_with(request)
+        .await
+        .unwrap();
+
+        assert!(response.is_none());
+    }
+
+    #[tokio::test]
+    async fn forbidden_maps_to_forbidden_error() {
+        let project_id = "a".repeat(32);
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method(Method::Get))
+            .and(path(format!("/internal/project/key/{project_id}")))
+            .respond_with(ResponseTemplate::new(StatusCode::FORBIDDEN))
+            .mount(&mock_server)
+            .await;
+
+        let result = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN, "st", "sv")
+            .unwrap()
+            .project_data(&project_id)
+            .await;
+
+        // A 403 is a terminal denial and must be distinguishable from a
+        // transient outage so callers can fail closed.
+        assert!(matches!(result, Err(RegistryError::Forbidden(_))));
+    }
+
+    #[tokio::test]
+    async fn server_error_maps_to_server_error() {
+        let project_id = "a".repeat(32);
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method(Method::Get))
+            .and(path(format!("/internal/project/key/{project_id}")))
+            .respond_with(ResponseTemplate::new(StatusCode::INTERNAL_SERVER_ERROR))
+            .mount(&mock_server)
+            .await;
+
+        let result = RegistryHttpClient::new(mock_server.uri(), "auth", TEST_ORIGIN, "st", "sv")
+            .unwrap()
+            .project_data(&project_id)
+            .await;
+
+        assert!(matches!(result, Err(RegistryError::ServerError(_))));
     }
 
     #[tokio::test]

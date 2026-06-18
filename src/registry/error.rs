@@ -17,6 +17,20 @@ pub enum RegistryError {
     #[error("invalid response: {0}")]
     Response(String),
 
+    /// The registry definitively rejected the request (HTTP 403). This is a
+    /// terminal denial, not a transient outage: callers must fail closed.
+    #[error("forbidden: {0}")]
+    Forbidden(String),
+
+    /// The registry rate-limited the request (HTTP 429).
+    #[error("rate limited: {0}")]
+    RateLimited(String),
+
+    /// The registry failed to serve the request (HTTP 5xx). This is a
+    /// transient, server-side error and is safe to retry.
+    #[error("server error: {0}")]
+    ServerError(String),
+
     #[error("building URL: {0}")]
     UrlBuild(url::ParseError),
 
