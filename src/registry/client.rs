@@ -289,11 +289,16 @@ impl RegistryHttpClient {
         if !is_valid_project_id(request.id) {
             return Ok(None);
         }
-        // Always fetch the base project data
-        let data = self
-            .project_data(request.id)
-            .await?
-            .ok_or_else(|| RegistryError::Response("Project not found".to_string()))?;
+        // Always fetch the base project data. A missing project (registry
+        // returns 404) must surface as `Ok(None)` so callers can tell
+        // "project not found" apart from a transient registry error, matching
+        // the behaviour of `project_data_with_limits_impl`. Returning an `Err`
+        // here causes callers to treat an unknown project as a registry outage
+        // and fail open.
+        let data = match self.project_data(request.id).await? {
+            Some(data) => data,
+            None => return Ok(None),
+        };
 
         let limits = match request.include_limits {
             true => Some(
@@ -528,6 +533,41 @@ mod test {
             .project_data(&project_id)
             .await
             .unwrap();
+        assert!(response.is_none());
+    }
+
+    #[tokio::test]
+    async fn project_data_with_returns_none_when_project_not_found() {
+        let project_id = "a".repeat(32);
+
+        let mock_server = MockServer::start().await;
+
+        // Registry returns 404 for a well-formed but unregistered project id.
+        Mock::given(method(Method::Get))
+            .and(path(format!("/internal/project/key/{project_id}")))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        let request = crate::project::ProjectDataRequest::new(&project_id).include_limits();
+
+        let response = RegistryHttpClient::with_config(
+            mock_server.uri(),
+            Some(mock_server.uri()),
+            "auth",
+            TEST_ORIGIN,
+            "st",
+            "sv",
+            Default::default(),
+        )
+        .unwrap()
+        .project_data_with(request)
+        .await
+        .unwrap();
+
+        // A missing project must be `Ok(None)`, not an `Err`: an `Err` makes
+        // callers treat an unknown project as a transient registry outage and
+        // fail open instead of rejecting the request.
         assert!(response.is_none());
     }
 
