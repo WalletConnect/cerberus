@@ -484,7 +484,7 @@ mod test {
 
         let mock_server = MockServer::start().await;
 
-        Mock::given(method(Method::Get))
+        Mock::given(method(Method::GET))
             .and(path(format!("/internal/project/key/{project_id}")))
             .respond_with(ResponseTemplate::new(StatusCode::OK).set_body_json(mock_project_data()))
             .mount(&mock_server)
@@ -515,7 +515,7 @@ mod test {
 
         let mock_server = MockServer::start().await;
 
-        Mock::given(method(Method::Get))
+        Mock::given(method(Method::GET))
             .and(path(format!("/internal/project/key/{project_id}")))
             .and(query_param("quotas", "true"))
             .respond_with(
@@ -538,7 +538,7 @@ mod test {
 
         let mock_server = MockServer::start().await;
 
-        Mock::given(method(Method::Get))
+        Mock::given(method(Method::GET))
             .and(path(format!("/internal/project/key/{project_id}")))
             .respond_with(ResponseTemplate::new(404))
             .mount(&mock_server)
@@ -559,7 +559,7 @@ mod test {
         let mock_server = MockServer::start().await;
 
         // Registry returns 404 for a well-formed but unregistered project id.
-        Mock::given(method(Method::Get))
+        Mock::given(method(Method::GET))
             .and(path(format!("/internal/project/key/{project_id}")))
             .respond_with(ResponseTemplate::new(404))
             .mount(&mock_server)
@@ -594,14 +594,14 @@ mod test {
         let mock_server = MockServer::start().await;
 
         // The project itself exists...
-        Mock::given(method(Method::Get))
+        Mock::given(method(Method::GET))
             .and(path(format!("/internal/project/key/{project_id}")))
             .respond_with(ResponseTemplate::new(StatusCode::OK).set_body_json(mock_project_data()))
             .mount(&mock_server)
             .await;
 
         // ...but its limits record is missing (404).
-        Mock::given(method(Method::Get))
+        Mock::given(method(Method::GET))
             .and(path("/internal/v1/project-limits"))
             .respond_with(ResponseTemplate::new(404))
             .mount(&mock_server)
@@ -635,13 +635,13 @@ mod test {
 
         let mock_server = MockServer::start().await;
 
-        Mock::given(method(Method::Get))
+        Mock::given(method(Method::GET))
             .and(path(format!("/internal/project/key/{project_id}")))
             .respond_with(ResponseTemplate::new(StatusCode::OK).set_body_json(mock_project_data()))
             .mount(&mock_server)
             .await;
 
-        Mock::given(method(Method::Get))
+        Mock::given(method(Method::GET))
             .and(path("/appkit/v1/config"))
             .respond_with(ResponseTemplate::new(404))
             .mount(&mock_server)
@@ -672,7 +672,7 @@ mod test {
 
         let mock_server = MockServer::start().await;
 
-        Mock::given(method(Method::Get))
+        Mock::given(method(Method::GET))
             .and(path(format!("/internal/project/key/{project_id}")))
             .respond_with(ResponseTemplate::new(StatusCode::FORBIDDEN))
             .mount(&mock_server)
@@ -694,7 +694,7 @@ mod test {
 
         let mock_server = MockServer::start().await;
 
-        Mock::given(method(Method::Get))
+        Mock::given(method(Method::GET))
             .and(path(format!("/internal/project/key/{project_id}")))
             .respond_with(ResponseTemplate::new(StatusCode::INTERNAL_SERVER_ERROR))
             .mount(&mock_server)
@@ -756,7 +756,7 @@ mod test {
 
         let mock_server = MockServer::start().await;
 
-        Mock::given(method(Method::Get))
+        Mock::given(method(Method::GET))
             .and(path(format!("/internal/project/key/{project_id}")))
             .respond_with(ResponseTemplate::new(StatusCode::UNAUTHORIZED))
             .mount(&mock_server)
@@ -830,7 +830,7 @@ mod test {
         let project_id = "a".repeat(32);
         let mock_server = MockServer::start().await;
 
-        Mock::given(method(Method::Get))
+        Mock::given(method(Method::GET))
             .and(path("/appkit/v1/config"))
             .and(query_param("projectId", project_id.clone()))
             .and(query_param("st", "st"))
@@ -869,14 +869,14 @@ mod test {
         let mock_server = MockServer::start().await;
 
         // Mock project data endpoint
-        Mock::given(method(Method::Get))
+        Mock::given(method(Method::GET))
             .and(path(format!("/internal/project/key/{project_id}")))
             .respond_with(ResponseTemplate::new(StatusCode::OK).set_body_json(mock_project_data()))
             .mount(&mock_server)
             .await;
 
         // Mock project limits endpoint
-        Mock::given(method(Method::Get))
+        Mock::given(method(Method::GET))
             .and(path("/internal/v1/project-limits"))
             .and(query_param("projectId", project_id.clone()))
             .and(query_param("st", "st"))
@@ -894,7 +894,7 @@ mod test {
             .await;
 
         // Mock features endpoint
-        Mock::given(method(Method::Get))
+        Mock::given(method(Method::GET))
             .and(path("/appkit/v1/config"))
             .and(query_param("projectId", project_id.clone()))
             .and(query_param("st", "st"))
@@ -949,14 +949,14 @@ mod test {
         let mock_server = MockServer::start().await;
 
         // Mock project data endpoint
-        Mock::given(method(Method::Get))
+        Mock::given(method(Method::GET))
             .and(path(format!("/internal/project/key/{project_id}")))
             .respond_with(ResponseTemplate::new(StatusCode::OK).set_body_json(mock_project_data()))
             .mount(&mock_server)
             .await;
 
         // Mock project limits endpoint
-        Mock::given(method(Method::Get))
+        Mock::given(method(Method::GET))
             .and(path("/internal/v1/project-limits"))
             .and(query_param("projectId", project_id.clone()))
             .and(query_param("st", "st"))
@@ -1009,14 +1009,14 @@ mod test {
         let mock_server = MockServer::start().await;
 
         // Mock project data endpoint
-        Mock::given(method(Method::Get))
+        Mock::given(method(Method::GET))
             .and(path(format!("/internal/project/key/{project_id}")))
             .respond_with(ResponseTemplate::new(StatusCode::OK).set_body_json(mock_project_data()))
             .mount(&mock_server)
             .await;
 
         // Mock features endpoint
-        Mock::given(method(Method::Get))
+        Mock::given(method(Method::GET))
             .and(path("/appkit/v1/config"))
             .and(query_param("projectId", project_id.clone()))
             .and(query_param("st", "st"))
@@ -1063,7 +1063,7 @@ mod test {
         let mock_server = MockServer::start().await;
 
         // Mock project data endpoint
-        Mock::given(method(Method::Get))
+        Mock::given(method(Method::GET))
             .and(path(format!("/internal/project/key/{project_id}")))
             .respond_with(ResponseTemplate::new(StatusCode::OK).set_body_json(mock_project_data()))
             .mount(&mock_server)
