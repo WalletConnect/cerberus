@@ -134,7 +134,22 @@ impl ProjectData {
             .ok_or(AccessError::KeyInvalid)?;
 
         if let Some((origin, source)) = origin {
-            let origin = Origin::try_from(origin).map_err(|_| AccessError::OriginNotAllowed)?;
+            let list = match source {
+                OriginSource::Header => &self.allowed_origins,
+                OriginSource::BundleId => &self.bundle_ids,
+                OriginSource::PackageName => &self.package_names,
+            };
+
+            // No allow-list configured: every origin is accepted, so an origin the
+            // strict parser rejects (e.g. `file://` from WebView apps) must not be
+            // turned into a denial. Matches pre-0.16 behavior.
+            let Ok(origin) = Origin::try_from(origin) else {
+                return if list.is_empty() {
+                    Ok(())
+                } else {
+                    Err(AccessError::OriginNotAllowed)
+                };
+            };
 
             match source {
                 OriginSource::Header => self.check_header(&origin),
@@ -335,5 +350,47 @@ mod test {
                 Some(("invalid.host.com", OriginSource::PackageName))
             )
             .is_ok());
+    }
+
+    fn project_with_allowed_origins(allowed_origins: Vec<String>) -> ProjectData {
+        ProjectData {
+            uuid: "test".to_owned(),
+            creator: "test".to_owned(),
+            push_url: None,
+            name: "test".to_owned(),
+            keys: vec![ProjectKey {
+                value: "test".to_owned(),
+                is_valid: true,
+            }],
+            verified_domains: vec![],
+            is_rate_limited: false,
+            is_verify_enabled: false,
+            allowed_origins,
+            is_enabled: true,
+            bundle_ids: vec![],
+            package_names: vec![],
+        }
+    }
+
+    #[test]
+    fn unparsable_origin_allowed_without_allow_list() {
+        let project = project_with_allowed_origins(vec![]);
+        for origin in ["file://", "https://[::1]:3000", "example.com."] {
+            assert!(
+                project
+                    .validate_access("test", Some((origin, OriginSource::Header)))
+                    .is_ok(),
+                "{origin}"
+            );
+        }
+    }
+
+    #[test]
+    fn unparsable_origin_denied_with_allow_list() {
+        let project = project_with_allowed_origins(vec!["https://app.example.com".to_owned()]);
+        assert!(matches!(
+            project.validate_access("test", Some(("file://", OriginSource::Header))),
+            Err(AccessError::OriginNotAllowed)
+        ));
     }
 }
