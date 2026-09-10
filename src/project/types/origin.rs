@@ -88,6 +88,25 @@ impl<'a> TryFrom<&'a str> for Origin<'a> {
     type Error = OriginParseError;
 
     fn try_from(s: &'a str) -> Result<Self, Self::Error> {
+        // `scheme://` with no host (e.g. `file://` sent by WebView/Cordova/Capacitor
+        // apps). The pre-0.16 parser read this as hostname `file`; keep that so
+        // such origins fall through to the allow-list check instead of being
+        // rejected outright.
+        if let Some(scheme) = s.strip_suffix("://") {
+            if !scheme.is_empty()
+                && scheme
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+            {
+                return Ok(Origin {
+                    scheme: None,
+                    hostname: scheme,
+                    hostname_parts: vec![scheme],
+                    port: None,
+                });
+            }
+        }
+
         let caps = ORIGIN_PARSER_REGEX
             .captures(s)
             .ok_or(OriginParseError::InvalidFormat)?;
@@ -519,5 +538,13 @@ mod test {
         let entry = Origin::try_from("HTTPS://app.example.com").unwrap();
         let origin = Origin::try_from("https://app.example.com").unwrap();
         assert!(entry.matches(&origin));
+    }
+
+    #[test]
+    fn scheme_only_origin_parses_as_legacy_hostname() {
+        let origin = Origin::try_from("file://").unwrap();
+        assert_eq!(origin.hostname(), "file");
+        assert!(Origin::try_from("://").is_err());
+        assert!(Origin::try_from("").is_err());
     }
 }
