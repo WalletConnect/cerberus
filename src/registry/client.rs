@@ -289,13 +289,51 @@ impl RegistryHttpClient {
         if !is_valid_project_id(request.id) {
             return Ok(None);
         }
-        // Always fetch the base project data. A missing project (registry
-        // returns 404) must surface as `Ok(None)` so callers can tell
+
+        // The three upstream calls are independent and span two hosts — the
+        // explorer serves project data, the internal API serves limits and
+        // features — so issue them concurrently. Awaiting them in sequence made
+        // the wall time of a `project_data_with` call the *sum* of two or three
+        // round trips, which is what callers pay on every cache miss.
+        //
+        // `join!`, deliberately not `try_join!`: `try_join!` short-circuits on
+        // the first error, so a transport failure on limits or features would
+        // pre-empt a 404 on the base project data and report "registry
+        // unavailable" where the sequential code reported "project not found".
+        // That is the fail-open bug #33 and #34 fixed. Awaiting all three and
+        // then resolving them in the original precedence order below keeps the
+        // outcome identical to the sequential version for every input; only the
+        // timing changes.
+        //
+        // The cost of that concurrency: a project that 404s now also issues the
+        // limits/features calls, which the sequential version skipped. Unknown
+        // project IDs are a negligible share of traffic and callers cache the
+        // not-found result, so this trades a rare extra call for a latency win
+        // on the common path.
+        let (data, limits, features) = tokio::join!(
+            self.project_data(request.id),
+            async {
+                match request.include_limits {
+                    true => self.project_limits(request.id).await,
+                    false => Ok(None),
+                }
+            },
+            async {
+                match request.include_features {
+                    true => self.project_features(request.id).await,
+                    false => Ok(None),
+                }
+            },
+        );
+
+        // Resolve in the same order the sequential implementation used, so the
+        // base project data still decides the outcome first: a missing project
+        // (registry returns 404) must surface as `Ok(None)` so callers can tell
         // "project not found" apart from a transient registry error, matching
         // the behaviour of `project_data_with_limits_impl`. Returning an `Err`
         // here causes callers to treat an unknown project as a registry outage
         // and fail open.
-        let data = match self.project_data(request.id).await? {
+        let data = match data? {
             Some(data) => data,
             None => return Ok(None),
         };
@@ -306,7 +344,7 @@ impl RegistryHttpClient {
         // makes callers treat a definitively-absent limit/feature record as a
         // transient registry outage and fail open.
         let limits = match request.include_limits {
-            true => match self.project_limits(request.id).await? {
+            true => match limits? {
                 Some(response) => Some(response.plan_limits),
                 None => return Ok(None),
             },
@@ -314,7 +352,7 @@ impl RegistryHttpClient {
         };
 
         let features = match request.include_features {
-            true => match self.project_features(request.id).await? {
+            true => match features? {
                 Some(response) => Some(response.features),
                 None => return Ok(None),
             },
@@ -1096,5 +1134,139 @@ mod test {
         // Check that optional fields are NOT included
         assert!(data.limits.is_none());
         assert!(data.features.is_none());
+    }
+
+    /// Delay applied to every mocked endpoint in the concurrency test. Large
+    /// enough that the sequential/concurrent gap dwarfs scheduling noise.
+    const CONCURRENCY_PROBE_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+
+    /// The three upstream calls must be issued concurrently, not chained.
+    ///
+    /// With every endpoint delayed by the same amount, a sequential
+    /// implementation takes 3x the delay and a concurrent one takes ~1x. The
+    /// bound sits at 2x: comfortably above one round trip even on a loaded CI
+    /// box, and comfortably below the two round trips the old code needed for
+    /// `include_limits` alone.
+    #[tokio::test]
+    async fn project_data_with_issues_upstream_calls_concurrently() {
+        let project_id = "a".repeat(32);
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method(Method::Get))
+            .and(path(format!("/internal/project/key/{project_id}")))
+            .respond_with(
+                ResponseTemplate::new(StatusCode::OK)
+                    .set_body_json(mock_project_data())
+                    .set_delay(CONCURRENCY_PROBE_DELAY),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method(Method::Get))
+            .and(path("/internal/v1/project-limits"))
+            .respond_with(
+                ResponseTemplate::new(StatusCode::OK)
+                    .set_body_json(LimitsResponse {
+                        plan_limits: crate::project::PlanLimits {
+                            tier: "free".to_string(),
+                            is_above_rpc_limit: false,
+                            is_above_mau_limit: false,
+                        },
+                    })
+                    .set_delay(CONCURRENCY_PROBE_DELAY),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method(Method::Get))
+            .and(path("/appkit/v1/config"))
+            .respond_with(
+                ResponseTemplate::new(StatusCode::OK)
+                    .set_body_json(mock_features_response())
+                    .set_delay(CONCURRENCY_PROBE_DELAY),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let request = crate::project::ProjectDataRequest::new(&project_id)
+            .include_limits()
+            .include_features();
+
+        let start = std::time::Instant::now();
+        let response = RegistryHttpClient::with_config(
+            mock_server.uri(),
+            Some(mock_server.uri()),
+            "auth",
+            TEST_ORIGIN,
+            "st",
+            "sv",
+            Default::default(),
+        )
+        .unwrap()
+        .project_data_with(request)
+        .await
+        .unwrap();
+        let elapsed = start.elapsed();
+
+        // All three responses still arrive intact.
+        let data = response.expect("project should be found");
+        assert!(data.limits.is_some());
+        assert!(data.features.is_some());
+
+        assert!(
+            elapsed < CONCURRENCY_PROBE_DELAY * 2,
+            "three {CONCURRENCY_PROBE_DELAY:?} calls took {elapsed:?}; they are being awaited \
+             sequentially rather than concurrently",
+        );
+    }
+
+    /// A 404 on the base project data means "project not found" and must win
+    /// over a transport/server failure on a sub-resource.
+    ///
+    /// This is why `project_data_with_impl` uses `join!` rather than
+    /// `try_join!`: `try_join!` returns the first error it sees, so the failing
+    /// limits call would surface as `Err` and callers — which fail open on a
+    /// registry error — would admit an unregistered project.
+    #[tokio::test]
+    async fn project_data_with_reports_not_found_even_when_sub_resource_fails() {
+        let project_id = "a".repeat(32);
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method(Method::Get))
+            .and(path(format!("/internal/project/key/{project_id}")))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&mock_server)
+            .await;
+
+        // Limits are simultaneously unhealthy.
+        Mock::given(method(Method::Get))
+            .and(path("/internal/v1/project-limits"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&mock_server)
+            .await;
+
+        let request = crate::project::ProjectDataRequest::new(&project_id).include_limits();
+
+        let response = RegistryHttpClient::with_config(
+            mock_server.uri(),
+            Some(mock_server.uri()),
+            "auth",
+            TEST_ORIGIN,
+            "st",
+            "sv",
+            Default::default(),
+        )
+        .unwrap()
+        .project_data_with(request)
+        .await;
+
+        match response {
+            Ok(None) => {}
+            Ok(Some(_)) => panic!("unregistered project must not resolve to project data"),
+            Err(err) => panic!(
+                "a 404 on the base project data must surface as Ok(None), not a registry error \
+                 that makes callers fail open; got {err:?}"
+            ),
+        }
     }
 }
