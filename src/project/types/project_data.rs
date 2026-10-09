@@ -193,7 +193,10 @@ impl ProjectData {
                 return Ok(());
             }
 
-            if allow_reverse && entry.matches_rev(origin) {
+            // A concrete entry may match its reversed labels (`app.example.com`
+            // and `com.example.app`). A wildcard is not a concrete reversal:
+            // `*.example.com` would also allow `com.example.app`.
+            if allow_reverse && !entry.hostname().contains('*') && entry.matches_rev(origin) {
                 return Ok(());
             }
         }
@@ -355,6 +358,25 @@ mod test {
             bundle_ids: vec![],
             package_names: vec![],
         }
+    }
+
+    #[test]
+    fn wildcard_allow_list_does_not_match_a_reversed_host() {
+        let project = project_with_allowed_origins(vec!["*.example.com".to_owned()]);
+
+        assert!(matches!(
+            project.validate_access(
+                "test",
+                Some(("https://com.example.app", OriginSource::Header))
+            ),
+            Err(AccessError::OriginNotAllowed)
+        ));
+        assert!(project
+            .validate_access(
+                "test",
+                Some(("https://app.example.com", OriginSource::Header))
+            )
+            .is_ok());
     }
 
     #[test]
